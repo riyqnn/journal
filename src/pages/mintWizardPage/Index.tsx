@@ -210,7 +210,7 @@ export default function MintWizardPage() {
   // STEP 2: AI SCANNING
   if (step === 2) {
     return (
-      <div className="min-h-screen w-full bg-white flex flex-col items-center justify-center p-4 border-t-4 border-black font-sans relative">
+      <div className="min-h-screen w-full bg-white flex flex-col items-center justify-center p-4 font-sans relative">
          <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
          
          <div className="w-full max-w-xl text-center relative z-10 border-2 border-black p-12 bg-white shadow-[12px_12px_0px_0px_rgba(0,0,0,1)]">
@@ -240,7 +240,7 @@ export default function MintWizardPage() {
     // --- SKENARIO 1: REJECTED ---
     if (aiResult.status === "REJECTED") {
       return (
-        <div className="min-h-screen w-full bg-red-50 flex items-center justify-center p-4 font-sans border-t-4 border-black">
+        <div className="min-h-screen w-full bg-red-50 flex items-center justify-center p-4 font-sans">
           <Card className="w-full max-w-lg border-2 border-black shadow-[12px_12px_0px_0px_rgba(0,0,0,1)] bg-white rounded-none">
             <CardHeader className="text-center pb-6 border-b-2 border-black bg-red-100 pt-8">
               <div className="w-20 h-20 bg-red-600 text-white border-2 border-black flex items-center justify-center mx-auto mb-4 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
@@ -270,7 +270,7 @@ export default function MintWizardPage() {
 
     // --- SKENARIO 2: ACCEPTED (Mint Draft) ---
     return (
-      <div className="min-h-screen w-full bg-white flex flex-col items-center pt-12 pb-12 font-sans border-t-4 border-black relative">
+      <div className="min-h-screen w-full bg-white flex flex-col items-center pt-12 pb-12 font-sans relative">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
         
         <BrutalistStepper current={3} />
@@ -363,7 +363,7 @@ export default function MintWizardPage() {
   // STEP 4: SUCCESS
   if (step === 4) {
     return (
-      <div className="min-h-screen w-full bg-green-50 flex flex-col items-center justify-center p-4 border-t-4 border-black font-sans relative">
+      <div className="min-h-screen w-full bg-green-50 flex flex-col items-center justify-center p-4 font-sans relative">
          <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none" />
          
          <BrutalistStepper current={4} />
