@@ -47,8 +47,6 @@ const router = createBrowserRouter([
       },
 
       // --- PROTECTED ROUTES (Harus Connect Wallet) ---
-      // Rute ini dibungkus ProtectedLayout. 
-      // Kalau user buka /mint tapi belum login, tampilan "Access Restricted" muncul.
       {
         element: <ProtectedLayout />,
         children: [
