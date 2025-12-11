@@ -12,6 +12,7 @@ interface Author {
 }
 
 interface PaperCardProps {
+  id?: string;
   title: string;
   abstract: string;
   authors: Author[];
@@ -69,6 +70,7 @@ const getAiScoreColor = (score: number) => {
 };
 
 export const PaperCard = ({ 
+  id,
   title, 
   abstract, 
   authors, 

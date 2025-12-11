@@ -11,13 +11,14 @@ import { useEffect, useState } from "react";
 const MOCK_ASSET = {
     id: "IP-MOCK-1",
     title: "Optimizing ZK-Rollups for High Frequency Trading",
-    author: { name: "Dr. Sari Wijaya", org: "ITB", wallet: "0x71...9A21", sinta: 1 },
-    abstract: "This paper proposes a novel approach to latency reduction in ZK-Rollups verified by Reviewer DAO...",
+    author: { name: "Dr. Sari Wijaya", org: "Institute Blockchain Technology", wallet: "0x71...9A21", sinta: 1 },
+    abstract: "This paper was a Mockup Data.",
     licenseType: "Commercial (PIL)",
     status: "verified",
     price: "50 IP",
     txHash: "0x123...",
-    pdfUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+    pdfUrl: "https://gateway.pinata.cloud/ipfs/bafkreianxbcza2aey7wl5anugf65q6vogq2tscptth5y5poxyylhn6tjfe"
+
 };
 
 export default function AssetDetailPage() {
