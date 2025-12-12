@@ -15,7 +15,7 @@
 
 ## 🧐 The Problem
 The academic publishing industry is broken:
-1.  **Predatory Journals:** Researchers pay high APC (Article Processing Charges) but lose copyright ownership.
+1.  **Predatory Journals:** Researchers pay high APC (*Article Processing Charges*) but lose copyright ownership.
 2.  **Zero Royalties:** Authors rarely earn from citations or downloads.
 3.  **Wasted Data:** "Negative results" or failed experiments are discarded, wasting valuable training data for AI models.
 4.  **Slow Review:** Peer review takes months, often blocked by bias.
@@ -31,6 +31,12 @@ The academic publishing industry is broken:
     * **Verified Papers:** Get a Commercial License (PIL). Authors earn royalties.
     * **Data Pool:** Rejected papers become "Data Assets" for training AI models (monetizing failure).
 * **🎨 Neo-Brutalist UI:** A raw, honest, and bold design language emphasizing transparency.
+
+### 🔄 Protocol Flow
+
+<div align="center">
+  <img width="800" alt="JUDOL Protocol Flow" src="https://github.com/user-attachments/assets/58537679-0790-469e-99a5-089892cc96c3" />
+</div>
 
 ---
 
