@@ -364,6 +364,29 @@ export const useContract = () => {
     return () => {}; // No-op unsubscribe function
   };
 
+  /**
+   * Get AI trust score from IPFS metadata
+   * @param ipfsHash IPFS hash of the metadata JSON
+   * @returns AI score (0-100) or null if not found
+   */
+  const getPaperAIScore = async (ipfsHash: string): Promise<number | null> => {
+    if (!ipfsHash) return null;
+
+    try {
+      const response = await fetch(`https://gateway.pinata.cloud/ipfs/${ipfsHash}`);
+      if (!response.ok) return null;
+      const metadata = await response.json();
+      const aiCertaintyAttr = metadata.attributes?.find((a: any) => a.trait_type === "AICertainty");
+      if (aiCertaintyAttr?.value) {
+        return parseInt(aiCertaintyAttr.value.replace("%", ""));
+      }
+      return null;
+    } catch (error) {
+      console.error("Error fetching AI score:", error);
+      return null;
+    }
+  };
+
   return {
     mintPaper,
     isMinting,
@@ -374,6 +397,7 @@ export const useContract = () => {
     updatePaperStatus,
     isUpdating,
     watchPaperEvents,
+    getPaperAIScore,
     contractAddress: CONTRACT_ADDRESS
   };
 };

@@ -8,50 +8,102 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useContract, PaperMetadata } from "@/hooks/useContract";
-import { useAllPapers } from "@/hooks/useContractQuery";
+import { useAllPapers, useTotalSupply } from "@/hooks/useContractQuery";
+import { PRICING } from "@/config/pricing";
 import { formatDistanceToNow } from "date-fns";
 
-const ITEMS_PER_PAGE = 6;
-
-// Map contract data to Paper interface
-const mapContractToPaper = (contract: PaperMetadata, index: number) => ({
-  id: contract.tokenId,
-  title: contract.title,
-  author: contract.author,
-  authorOrg: contract.affiliation || "Unknown Organization",
-  abstract: `Research paper minted on blockchain. Status: ${contract.status}. Token ID: ${contract.tokenId}`,
-  type: "Research" as const,
-  license: "Commercial (PIL)",
-  sinta: null, // Could be stored in metadata
-  aiScore: Math.floor(Math.random() * 20) + 80, // Simulated score for now
-  tierLabel: contract.status === "Verified" ? "Verified" : "Pending Review",
-  mintDate: formatDistanceToNow(new Date(contract.mintedAt), { addSuffix: true }),
-  views: Math.floor(Math.random() * 1000), // Simulated views
-  downloads: Math.floor(Math.random() * 500), // Simulated downloads
-  price: contract.status === "Verified" ? "50 USDC" : "-",
-  status: contract.status.toLowerCase() as 'verified' | 'processing' | 'data_pool',
-  category: "Blockchain Research",
-  metadataUrl: contract.ipfsHash,
-});
+const ITEMS_PER_PAGE_OPTIONS = [12, 24, 48, 96];
 
 export default function ExplorePage() {
+  const { getPaperAIScore } = useContract();
+
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("all");
 
   const [quickFilter, setQuickFilter] = useState<'none' | 'sinta1' | 'top_rated' | 'verified'>('none');
   const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(12);
+
+  // Get actual total supply from blockchain
+  const { data: totalSupply } = useTotalSupply();
+  const totalPapers = Number(totalSupply) || 0;
 
   // Use React Query for optimized data fetching with caching
   const { data: contractPapers = [], isLoading, error, refetch } = useAllPapers(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    ITEMS_PER_PAGE
+    (currentPage - 1) * itemsPerPage,
+    itemsPerPage
   );
 
+  // AI scores cache
+  const [aiScores, setAiScores] = useState<Record<string, number>>({});
+  const [abstracts, setAbstracts] = useState<Record<string, string>>({});
+
+  // Fetch AI scores and abstracts for all papers
+  useEffect(() => {
+    const fetchData = async () => {
+      const scores: Record<string, number> = {};
+      const abstractsData: Record<string, string> = {};
+
+      await Promise.all(
+        contractPapers.map(async (paper) => {
+          // Fetch AI Score
+          const score = await getPaperAIScore(paper.ipfsHash);
+          if (score !== null) {
+            scores[paper.tokenId] = score;
+          }
+
+          // Fetch Abstract from IPFS
+          try {
+            const response = await fetch(`https://gateway.pinata.cloud/ipfs/${paper.ipfsHash}`);
+            if (response.ok) {
+              const metadata = await response.json();
+              if (metadata.description) {
+                abstractsData[paper.tokenId] = metadata.description;
+              }
+            }
+          } catch (error) {
+            console.error(`Failed to fetch abstract for ${paper.tokenId}:`, error);
+          }
+        })
+      );
+
+      setAiScores(scores);
+      setAbstracts(abstractsData);
+    };
+
+    if (contractPapers.length > 0) {
+      fetchData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contractPapers]); // Remove getPaperAIScore from deps to prevent infinite loop
+
   // Map contract data to Paper interface using useMemo for performance
-  const papers = useMemo(() =>
-    contractPapers.map((p, i) => mapContractToPaper(p, i)),
-    [contractPapers]
-  );
+  const papers = useMemo(() => {
+    return contractPapers.map((p) => {
+      const aiScore = aiScores[p.tokenId] || 0;
+      const isVerified = p.status === "Verified";
+      const abstractText = abstracts[p.tokenId] || "Abstract not available. Click to view details.";
+      return {
+        id: p.tokenId,
+        title: p.title,
+        author: p.author,
+        authorOrg: p.affiliation || "Unknown Organization",
+        abstract: abstractText,
+        type: "Research" as const,
+        license: "Commercial (PIL)",
+        sinta: null, // Could be stored in metadata
+        aiScore: aiScore,
+        tierLabel: isVerified ? "Verified" : "Pending Review",
+        mintDate: formatDistanceToNow(new Date(p.mintedAt), { addSuffix: true }),
+        views: Math.floor(Math.random() * 1000), // Simulated views
+        downloads: Math.floor(Math.random() * 500), // Simulated downloads
+        price: isVerified ? PRICING.getRewardForScore(aiScore) : "-",
+        status: p.status.toLowerCase() as 'verified' | 'processing' | 'data_pool',
+        category: "Blockchain Research",
+        metadataUrl: p.ipfsHash,
+      };
+    });
+  }, [contractPapers, aiScores, abstracts]);
 
   // --- FILTER LOGIC ---
   const filteredPapers = papers.filter((paper) => {
@@ -82,30 +134,43 @@ export default function ExplorePage() {
   const hasActiveFilters = searchTerm || filterType !== "all" || quickFilter !== 'none';
   const displayPapers = hasActiveFilters ? filteredPapers : papers;
   const totalPages = hasActiveFilters
-    ? Math.ceil(filteredPapers.length / ITEMS_PER_PAGE)
-    : Math.ceil(papers.length / ITEMS_PER_PAGE) + 1; // +1 because we don't know total count
+    ? Math.ceil(filteredPapers.length / itemsPerPage)
+    : Math.ceil(totalPapers / itemsPerPage);
 
-  const startIndex = hasActiveFilters ? (currentPage - 1) * ITEMS_PER_PAGE : 0;
+  const startIndex = hasActiveFilters ? (currentPage - 1) * itemsPerPage : 0;
   const currentPapers = hasActiveFilters
-    ? displayPapers.slice(startIndex, startIndex + ITEMS_PER_PAGE)
+    ? displayPapers.slice(startIndex, startIndex + itemsPerPage)
     : papers;
 
-  // Reset page when filters change
+  // Page number generator for pagination
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+    if (endPage - startPage < maxVisible - 1) {
+      startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
+
+  // Reset page when filters or items per page change
   useEffect(() => {
     if (hasActiveFilters) {
       setCurrentPage(1);
     }
-  }, [searchTerm, filterType, quickFilter, hasActiveFilters]);
+  }, [searchTerm, filterType, quickFilter, itemsPerPage, hasActiveFilters]);
 
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= totalPages) {
         setCurrentPage(newPage);
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  };
-
-  const handleLoadMore = () => {
-    setCurrentPage(p => p + 1);
   };
 
   const toggleQuickFilter = (type: 'sinta1' | 'top_rated' | 'verified') => {
@@ -179,10 +244,30 @@ export default function ExplorePage() {
         </div>
 
         {/* STATS BAR & QUICK FILTERS */}
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 px-1 gap-4">
-          <p className="text-lg font-bold font-mono">
-            FOUND <span className="bg-black text-white px-2 py-0.5">{filteredPapers.length}</span> ASSETS
-          </p>
+        <div className="flex flex-col lg:flex-row items-start justify-between mb-8 px-1 gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <p className="text-lg font-bold font-mono">
+              FOUND <span className="bg-black text-white px-2 py-0.5">{filteredPapers.length}</span> ASSETS
+            </p>
+            {/* Items Per Page Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold">SHOW:</span>
+              {ITEMS_PER_PAGE_OPTIONS.map(option => (
+                <Button
+                  key={option}
+                  onClick={() => {
+                    setItemsPerPage(option);
+                    setCurrentPage(1);
+                  }}
+                  className={`h-8 px-3 text-sm border-2 rounded-none font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] transition-all ${
+                    itemsPerPage === option ? 'bg-black text-white' : 'bg-white text-black'
+                  } border-black`}
+                >
+                  {option}
+                </Button>
+              ))}
+            </div>
+          </div>
           <div className="flex gap-3">
             <Badge variant="outline" onClick={() => toggleQuickFilter('sinta1')} className={`cursor-pointer border-2 border-black rounded-none px-3 py-1 font-bold transition-all shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] select-none ${quickFilter === 'sinta1' ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-white text-black hover:bg-black hover:text-white'}`}>
                 {quickFilter === 'sinta1' && <X className="w-3 h-3 mr-1" />} SINTA 1 ONLY
@@ -273,39 +358,60 @@ export default function ExplorePage() {
             </div>
 
             {/* PAGINATION CONTROLS */}
-            {hasActiveFilters && filteredPapers.length > ITEMS_PER_PAGE ? (
-              // Client-side pagination for filtered results
-              <div className="flex justify-center items-center mt-12 gap-4">
-                  <Button variant="outline" onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="h-12 w-12 p-0 border-2 border-black rounded-none shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:shadow-none disabled:translate-x-0 disabled:translate-y-0">
-                      <ChevronLeft className="h-6 w-6" />
-                  </Button>
-                  <div className="font-black text-lg bg-yellow-300 border-2 border-black px-4 py-2 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
-                      PAGE {currentPage} / {totalPages}
-                  </div>
-                  <Button variant="outline" onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage === totalPages} className="h-12 w-12 p-0 border-2 border-black rounded-none shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:shadow-none disabled:translate-x-0 disabled:translate-y-0">
-                      <ChevronRight className="h-6 w-6" />
-                  </Button>
-              </div>
-            ) : !hasActiveFilters && papers.length > 0 ? (
-              // Server-side "Load More" button for unfiltered results
-              <div className="flex justify-center mt-12">
+            {totalPages > 1 && (
+              <div className="flex flex-col items-center gap-4 mt-12">
+                <div className="text-sm font-mono font-bold text-neutral-600">
+                  Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, displayPapers.length)} of {displayPapers.length} papers
+                  {displayPapers.length !== totalPapers && ` (of ${totalPapers} total)`}
+                </div>
+
+                <div className="flex justify-center items-center gap-2 flex-wrap">
                   <Button
-                    onClick={handleLoadMore}
-                    disabled={isLoading || papers.length < ITEMS_PER_PAGE}
-                    className="h-14 px-8 bg-black text-white border-2 border-black rounded-none font-black shadow-[4px_4px_0px_0px_rgba(128,128,128,0.5)] hover:bg-white hover:text-black hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all uppercase"
+                    onClick={() => handlePageChange(1)}
+                    disabled={currentPage === 1}
+                    className="h-12 px-4 border-2 border-black rounded-none font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:shadow-none disabled:translate-x-0 disabled:translate-y-0"
                   >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="h-5 w-5 mr-2 animate-spin" /> LOADING...
-                      </>
-                    ) : papers.length < ITEMS_PER_PAGE ? (
-                      "NO MORE ASSETS"
-                    ) : (
-                      "LOAD MORE ASSETS"
-                    )}
+                    FIRST
                   </Button>
+                  <Button
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="h-12 w-12 p-0 border-2 border-black rounded-none shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:shadow-none disabled:translate-x-0 disabled:translate-y-0"
+                  >
+                    <ChevronLeft className="h-6 w-6" />
+                  </Button>
+
+                  {getPageNumbers().map(page => (
+                    <Button
+                      key={page}
+                      onClick={() => handlePageChange(page)}
+                      className={`h-12 w-12 p-0 border-2 border-black rounded-none font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all ${
+                        currentPage === page
+                          ? 'bg-black text-white'
+                          : 'bg-white text-black'
+                      }`}
+                    >
+                      {page}
+                    </Button>
+                  ))}
+
+                  <Button
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="h-12 w-12 p-0 border-2 border-black rounded-none shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:shadow-none disabled:translate-x-0 disabled:translate-y-0"
+                  >
+                    <ChevronRight className="h-6 w-6" />
+                  </Button>
+                  <Button
+                    onClick={() => handlePageChange(totalPages)}
+                    disabled={currentPage === totalPages}
+                    className="h-12 px-4 border-2 border-black rounded-none font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] disabled:opacity-50 disabled:shadow-none disabled:translate-x-0 disabled:translate-y-0"
+                  >
+                    LAST
+                  </Button>
+                </div>
               </div>
-            ) : null}
+            )}
 
             {/* Empty State */}
             {filteredPapers.length === 0 && (

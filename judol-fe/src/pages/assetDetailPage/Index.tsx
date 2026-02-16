@@ -8,12 +8,14 @@ import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { useAssetById } from "@/hooks/useUserAssets";
 import { useAccount } from "wagmi";
+import { useContract } from "@/hooks/useContract";
 import { PRICING } from "@/config/pricing";
 
 export default function AssetDetailPage() {
     const { id } = useParams();
     const { address } = useAccount();
     const { data: asset, isLoading, error } = useAssetById(id || '');
+    const { getPaperAIScore } = useContract();
 
     // --- 1. FETCH IPFS METADATA ---
     const [displayAsset, setDisplayAsset] = useState<any>(null);
@@ -32,6 +34,8 @@ export default function AssetDetailPage() {
                 let finalAbstract = asset.abstract || "Abstract not available.";
                 let finalAuthorName = asset.author || "Unknown Researcher";
 
+                // Fetch AI Score from IPFS
+                let aiScore = 0;
                 if (asset.ipfsHash) {
                     try {
                         const response = await fetch(`https://gateway.pinata.cloud/ipfs/${asset.ipfsHash}`);
@@ -42,6 +46,9 @@ export default function AssetDetailPage() {
                             const authorAttr = metadata.attributes?.find((attr: any) => attr.trait_type === "Author");
                             if (authorAttr) finalAuthorName = authorAttr.value;
                         }
+
+                        // Get AI score using the contract hook function
+                        aiScore = await getPaperAIScore(asset.ipfsHash) || 0;
                     } catch (error) {
                         console.error("Failed to fetch IPFS metadata:", error);
                     }
@@ -53,6 +60,11 @@ export default function AssetDetailPage() {
                     ? finalAbstract
                     : "This asset is currently under review. The full content is encrypted on IPFS pending commercial license verification.";
 
+                // Calculate price based on AI score (same as verify and earn)
+                const calculatedPrice = isVerified
+                    ? PRICING.getRewardForScore(aiScore)
+                    : "To be determined";
+
                 setDisplayAsset({
                     ...asset,
                     author: {
@@ -63,7 +75,8 @@ export default function AssetDetailPage() {
                     },
                     abstract: displayAbstract,
                     licenseType: "Commercial (PIL)",
-                    price: isVerified ? PRICING.getVerifiedPrice() : "To be determined",
+                    price: calculatedPrice,
+                    aiScore: aiScore,
                     pdfUrl: `https://gateway.pinata.cloud/ipfs/${asset.ipfsHash}`,
                     txHash: "0x...", // Would need to fetch from contract events
                 });
@@ -76,7 +89,8 @@ export default function AssetDetailPage() {
         };
 
         fetchMetadata();
-    }, [asset]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [asset]); // Remove getPaperAIScore from deps to prevent infinite loop
 
     const handleCopy = (text: string) => {
         navigator.clipboard.writeText(text);
@@ -132,9 +146,9 @@ export default function AssetDetailPage() {
                         <div className="space-y-6">
                             <div className="flex flex-wrap gap-3">
                                 <Badge variant="outline" className="bg-white text-black border-2 border-black rounded-none px-3 py-1 font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] text-sm">
-                                    {asset.type || "RESEARCH PAPER"}
+                                    {displayAsset?.type || "RESEARCH PAPER"}
                                 </Badge>
-                                {asset.status === 'verified' ? (
+                                {displayAsset?.status === 'verified' ? (
                                     <Badge variant="outline" className="bg-[#0065D1] text-white border-2 border-black rounded-none px-3 py-1 font-bold shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] text-sm">
                                         <ShieldCheck className="w-4 h-4 mr-2" /> VERIFIED SINTA
                                     </Badge>
@@ -144,23 +158,23 @@ export default function AssetDetailPage() {
                                     </Badge>
                                 )}
                                 <Badge className="bg-black text-white border-2 border-black rounded-none px-3 py-1 font-bold shadow-[2px_2px_0px_0px_rgba(128,128,128,0.5)] text-sm">
-                                    {asset.licenseType.toUpperCase()}
+                                    {displayAsset?.licenseType?.toUpperCase() || "COMMERCIAL (PIL)"}
                                 </Badge>
                             </div>
                             
                             <h1 className="text-4xl md:text-5xl font-black uppercase leading-tight text-black tracking-tighter">
-                                {asset.title}
+                                {displayAsset?.title || "Untitled Asset"}
                             </h1>
-                            
+
                             <div className="flex items-center gap-4 py-4 border-y-2 border-black border-dashed">
                                 <Avatar className="h-12 w-12 border-2 border-black rounded-none bg-pink-200">
-                                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${asset.author.name}`} />
+                                    <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${displayAsset?.author?.name || 'AU'}`} />
                                     <AvatarFallback className="font-bold text-black">AU</AvatarFallback>
                                 </Avatar>
                                 <div>
-                                    <div className="font-black text-lg uppercase">{asset.author.name}</div>
+                                    <div className="font-black text-lg uppercase">{displayAsset?.author?.name || "Unknown Author"}</div>
                                     <div className="text-xs font-mono font-bold text-neutral-500 bg-neutral-100 inline-block px-1 border border-neutral-300">
-                                        {asset.author.org}
+                                        {displayAsset?.author?.org || "Unknown Institution"}
                                     </div>
                                 </div>
                             </div>
@@ -174,7 +188,7 @@ export default function AssetDetailPage() {
                             </div>
                             <div className="p-6">
                                 <p className="text-base font-medium leading-relaxed font-mono">
-                                    "{asset.abstract}"
+                                    "{displayAsset?.abstract || "Abstract not available."}"
                                 </p>
                             </div>
                         </div>
@@ -205,12 +219,12 @@ export default function AssetDetailPage() {
                             </TabsList>
                             
                             <TabsContent value="preview" className="pt-0 border-2 border-black border-t-0 bg-white p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] mt-[-2px]">
-                                {asset.status === 'verified' ? (
+                                {displayAsset?.status === 'verified' ? (
                                     <div className="space-y-6">
                                         <div className="w-full h-[600px] border-2 border-black bg-neutral-100 relative">
                                             {/* Grid overlay for 'technical' feel */}
                                             <div className="absolute inset-0 bg-[linear-gradient(to_right,#00000012_1px,transparent_1px),linear-gradient(to_bottom,#00000012_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-10" />
-                                            <iframe src={asset.pdfUrl} className="w-full h-full relative z-0" title="PDF Preview" />
+                                            <iframe src={displayAsset?.pdfUrl} className="w-full h-full relative z-0" title="PDF Preview" />
                                         </div>
                                         <div className="flex justify-end">
                                             <Button onClick={handlePurchase} className="h-12 px-8 bg-black text-white border-2 border-black rounded-none font-black shadow-[4px_4px_0px_0px_rgba(128,128,128,0.5)] hover:bg-white hover:text-black hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all uppercase">
@@ -236,7 +250,7 @@ export default function AssetDetailPage() {
                             
                             <TabsContent value="history" className="pt-0 border-2 border-black border-t-0 bg-white p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] mt-[-2px]">
                                 <div className="space-y-6">
-                                    {asset.status === 'verified' && (
+                                    {displayAsset?.status === 'verified' && (
                                         <div className="flex gap-4 items-start border-l-4 border-green-500 pl-4 py-2 bg-green-50">
                                             <div className="mt-1 bg-green-500 border-2 border-black p-1 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]">
                                                 <CheckCircle2 className="w-4 h-4"/>
@@ -257,9 +271,9 @@ export default function AssetDetailPage() {
                                             <p className="text-xs font-bold text-neutral-600 font-mono">Initial IP Registration (Unverified)</p>
                                             <p
                                                 className="text-[10px] font-bold text-black mt-1 cursor-pointer hover:bg-black hover:text-white inline-block px-1 transition-colors"
-                                                onClick={() => window.open(`https://sepolia.arbiscan.io/tx/${asset.txHash}`, '_blank')}
+                                                onClick={() => window.open(`https://sepolia.arbiscan.io/tx/${displayAsset?.txHash}`, '_blank')}
                                             >
-                                                TX: {asset.txHash ? `${asset.txHash.slice(0, 10)}...` : "0x..."} <ExternalLink className="inline h-3 w-3"/>
+                                                TX: {displayAsset?.txHash ? `${displayAsset.txHash.slice(0, 10)}...` : "0x..."} <ExternalLink className="inline h-3 w-3"/>
                                             </p>
                                         </div>
                                     </div>
@@ -276,21 +290,21 @@ export default function AssetDetailPage() {
                             <div className="p-6 border-b-2 border-black bg-white">
                                 <div className="flex justify-between items-center mb-2">
                                     <span className="text-xs font-bold uppercase text-neutral-500 tracking-widest">Current Price</span>
-                                    <Badge variant="outline" className={`border-2 border-black rounded-none font-bold uppercase text-xs ${asset.status === 'verified' ? "bg-green-300 text-black" : "bg-neutral-200 text-neutral-500"}`}>
-                                        {asset.status === 'verified' ? "Live Market" : "Unlisted"}
+                                    <Badge variant="outline" className={`border-2 border-black rounded-none font-bold uppercase text-xs ${displayAsset?.status === 'verified' ? "bg-green-300 text-black" : "bg-neutral-200 text-neutral-500"}`}>
+                                        {displayAsset?.status === 'verified' ? "Live Market" : "Unlisted"}
                                     </Badge>
                                 </div>
                                 <div className="text-5xl font-black text-black font-mono flex items-center gap-1">
-                                    {asset.price}
+                                    {displayAsset?.price || "To be determined"}
                                 </div>
                             </div>
                             <div className="p-6">
-                                <Button 
+                                <Button
                                     className="w-full h-14 text-lg font-black uppercase bg-black text-white border-2 border-black rounded-none hover:bg-white hover:text-black hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all shadow-[4px_4px_0px_0px_rgba(128,128,128,0.5)]"
-                                    onClick={handlePurchase} 
-                                    disabled={asset.status !== 'verified'}
+                                    onClick={handlePurchase}
+                                    disabled={displayAsset?.status !== 'verified'}
                                 >
-                                    {asset.status === 'verified' ? "BUY LICENSE" : "VERIFICATION PENDING"}
+                                    {displayAsset?.status === 'verified' ? "BUY LICENSE" : "VERIFICATION PENDING"}
                                 </Button>
                                 <p className="text-[10px] font-bold text-center text-black mt-3 uppercase tracking-wide opacity-70">
                                     Includes Commercial Rights (PIL) & PDF Download.
@@ -307,17 +321,17 @@ export default function AssetDetailPage() {
                             <div className="p-6 space-y-4">
                                 <div className="flex justify-between items-center py-2 border-b-2 border-black border-dashed">
                                     <span className="text-xs font-bold uppercase text-neutral-500">Asset ID</span>
-                                    <div 
-                                        className="flex items-center gap-2 font-mono text-xs font-bold bg-black text-white px-2 py-1 cursor-pointer hover:bg-yellow-300 hover:text-black transition-colors" 
-                                        onClick={() => handleCopy(asset.id)}
+                                    <div
+                                        className="flex items-center gap-2 font-mono text-xs font-bold bg-black text-white px-2 py-1 cursor-pointer hover:bg-yellow-300 hover:text-black transition-colors"
+                                        onClick={() => handleCopy(displayAsset?.id || id || '')}
                                     >
-                                        {asset.id.slice(0, 10)}... <Copy className="w-3 h-3" />
+                                        {(displayAsset?.id || id || '').slice(0, 10)}... <Copy className="w-3 h-3" />
                                     </div>
                                 </div>
                                 <Button
                                     variant="outline"
                                     className="w-full h-10 text-xs font-bold uppercase border-2 border-black rounded-none hover:bg-black hover:text-white transition-all"
-                                    onClick={() => window.open(`https://sepolia.arbiscan.io/address/${asset.id}`, '_blank')}
+                                    onClick={() => window.open(`https://sepolia.arbiscan.io/address/${displayAsset?.id || id || ''}`, '_blank')}
                                 >
                                     View on Arbiscan <ExternalLink className="ml-2 h-3 w-3" />
                                 </Button>

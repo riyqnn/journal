@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import { UploadCloud, FileText, Sparkles, ArrowRight, Loader2, ShieldAlert, X, Lock, FileClock, Check, BrainCircuit, User, Building2, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,7 @@ export default function MintWizardPage() {
   const [mintResult, setMintResult] = useState<{ tokenId: string; txHash?: string } | null>(null);
 
   const { mintPaper, isMinting: isWeb3Minting } = useContract();
+  const queryClient = useQueryClient();
   const [aiResult, setAiResult] = useState<{ score: number; tier: string; status: "ACCEPTED" | "REJECTED"; } | null>(null);
 
   const form = useForm<MetadataFormValues>({
@@ -146,8 +148,19 @@ export default function MintWizardPage() {
 
     if (result && result.success) {
       toast.success("Successfully Minted!", { id: toastId, description: `Token #${result.tokenId} created on Arbitrum Sepolia` });
+
+      // Update local state first
       setMintResult({ tokenId: result.tokenId || "PENDING", txHash: result.txHash });
       setStep(4);
+
+      // Defer query invalidation to avoid setState during render
+      setTimeout(() => {
+        // Invalidate cache to refresh Dashboard and other pages
+        // This ensures the newly minted paper appears immediately
+        queryClient.invalidateQueries({ queryKey: ['userAssets'] });
+        queryClient.invalidateQueries({ queryKey: ['papers', 'status'] });
+        queryClient.invalidateQueries({ queryKey: ['papers', 'all'] });
+      }, 0);
     } else {
         toast.error("Minting Failed. Check console.", { id: toastId });
     }

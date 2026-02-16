@@ -29,29 +29,21 @@ interface IPAsset {
   status: string;
 }
 
-// Consistent mapping function with memoization
+// Consistent mapping function - uses actual blockchain data
 const mapContractToIPAsset = (paper: any): IPAsset => {
-  // Use token-based random values for consistency
-  const tokenNum = parseInt(paper.tokenId || "0");
-  const size = ((tokenNum % 50) / 10 + 1).toFixed(1); // Consistent based on tokenId
-  const itemCount = `${(tokenNum % 10) + 1},${((tokenNum * 17) % 900) + 100}`;
-  const formats = ["PDF", "JSONL", "CSV", "TXT"];
-  const format = formats[tokenNum % 4];
-  const integrityScore = (tokenNum % 20) + 80;
-  const downloads = (tokenNum * 23) % 500;
-
+  // Use actual blockchain data instead of fake values
   return {
     ipId: `IPA-${paper.tokenId?.substring(0, 6)}...${paper.tokenId?.substring(paper.tokenId.length - 4)}`,
     title: paper.title,
     description: paper.abstract || `Research paper from blockchain. Status: ${paper.status}. Minted: ${formatDistanceToNow(new Date(paper.mintedAt), { addSuffix: true })}`,
-    size: `${size} GB`,
-    itemCount,
-    format,
-    price: paper.status === "verified" ? "50 USDC" : "FREE",
+    size: "Unknown", // Would need to fetch from IPFS metadata
+    itemCount: "Unknown", // Would need to fetch from IPFS metadata
+    format: "PDF", // Default format, could be fetched from IPFS
+    price: "FREE", // Rejected/DataPool papers are free
     licenseType: paper.license || "Non-Commercial",
-    integrityScore,
-    downloads,
-    tags: [paper.category || "Research", "Blockchain", "Verified"],
+    integrityScore: 0, // Rejected papers have no integrity score
+    downloads: 0, // Start at 0 for data pool papers
+    tags: ["Failed Research", "Blockchain", paper.category || "Research"],
     tokenId: paper.tokenId,
     mintedAt: paper.mintedAt,
     status: paper.status,
@@ -61,11 +53,29 @@ const mapContractToIPAsset = (paper: any): IPAsset => {
 export default function DataPoolPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(24);
+  const [isRefetching, setIsRefetching] = useState(false);
 
-  const ITEMS_PER_PAGE = 12; // Load 12 items per page for 2-column grid
+  const ITEMS_PER_PAGE_OPTIONS = [12, 24, 48, 96];
 
   // Use React Query for optimized data fetching with background refresh
-  const { data: poolPapers = [], isLoading, refetch, isRefetching } = usePapersByStatus(PaperStatus.DataPool);
+  // Data Pool now shows both Rejected and DataPool papers (failed research)
+  const { data: rejectedPapers = [], isLoading: isLoadingRejected, refetch: refetchRejected } = usePapersByStatus(PaperStatus.Rejected);
+  const { data: dataPoolPapers = [], isLoading: isLoadingDataPool, refetch: refetchDataPool } = usePapersByStatus(PaperStatus.DataPool);
+
+  // Combine both datasets - prioritize showing rejected papers as "failed research"
+  const poolPapers = useMemo(() => [...rejectedPapers, ...dataPoolPapers], [rejectedPapers, dataPoolPapers]);
+  const isLoading = isLoadingRejected || isLoadingDataPool;
+
+  // Combined refetch function
+  const refetch = async () => {
+    setIsRefetching(true);
+    try {
+      await Promise.all([refetchRejected(), refetchDataPool()]);
+    } finally {
+      setIsRefetching(false);
+    }
+  };
 
   // Map contract papers to IPAsset interface using useMemo for performance
   const ipAssets = useMemo(() =>
@@ -83,11 +93,11 @@ export default function DataPoolPage() {
   );
 
   // Pagination logic
-  const totalPages = Math.ceil(filteredAssets.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const totalPages = Math.ceil(filteredAssets.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
   const displayAssets = useMemo(() =>
-    filteredAssets.slice(startIndex, startIndex + ITEMS_PER_PAGE),
-    [filteredAssets, startIndex]
+    filteredAssets.slice(startIndex, startIndex + itemsPerPage),
+    [filteredAssets, startIndex, itemsPerPage]
   );
 
   // Get stats from real data (memoized)
@@ -111,14 +121,31 @@ export default function DataPoolPage() {
     await refetch();
   };
 
-  // Reset page when search changes
+  // Generate page numbers to show (max 5 visible pages)
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxVisible = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+    if (endPage - startPage < maxVisible - 1) {
+      startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
+
+  // Reset page when search or itemsPerPage changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, itemsPerPage]);
 
   // Show all papers if no filters, show paginated if filtered
   const hasActiveFilters = searchTerm.length > 0;
-  const showLoadMore = !hasActiveFilters && displayAssets.length >= ITEMS_PER_PAGE && ipAssets.length > displayAssets.length;
+  const showLoadMore = !hasActiveFilters && displayAssets.length >= itemsPerPage && ipAssets.length > displayAssets.length;
 
   return (
     <div className="min-h-screen bg-white pb-20 font-sans relative selection:bg-yellow-300 selection:text-black">
@@ -203,7 +230,7 @@ export default function DataPoolPage() {
                     Available Assets ({filteredAssets.length})
                     {isRefetching && <RefreshCw className="inline ml-2 h-6 w-6 animate-spin text-neutral-400" />}
                 </h2>
-                <div className="flex gap-4 w-full md:w-auto">
+                <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto items-center">
                     <div className="relative w-full md:w-[400px]">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-black pointer-events-none" />
                         <Input
@@ -213,6 +240,25 @@ export default function DataPoolPage() {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
+
+                    {/* Items Per Page Selector */}
+                    <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-neutral-700 hidden md:inline">Show:</span>
+                        {ITEMS_PER_PAGE_OPTIONS.map(option => (
+                            <Button
+                                key={option}
+                                onClick={() => setItemsPerPage(option)}
+                                className={`h-10 px-3 text-sm border-2 rounded-none font-bold transition-all ${
+                                    itemsPerPage === option
+                                        ? 'bg-black text-white border-black'
+                                        : 'bg-white text-black border-black hover:bg-neutral-100'
+                                }`}
+                            >
+                                {option}
+                            </Button>
+                        ))}
+                    </div>
+
                     <Button className="h-14 px-8 bg-white text-black border-2 border-black rounded-none font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-black hover:text-white hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all">
                         <Filter className="h-5 w-5 mr-2" /> FILTER
                     </Button>
@@ -319,24 +365,61 @@ export default function DataPoolPage() {
               )}
             </div>
 
-            {/* Load More Button */}
-            {showLoadMore && (
-              <div className="flex justify-center mt-12">
-                <Button
-                  onClick={handleLoadMore}
-                  disabled={isLoading || isRefetching}
-                  className="h-14 px-12 bg-black text-white border-2 border-black rounded-none font-bold shadow-[4px_4px_0px_0px_rgba(128,128,128,0.5)] hover:bg-white hover:text-white transition-all uppercase"
-                >
-                  {isRefetching ? (
-                    <>
-                      <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading...
-                    </>
-                  ) : displayAssets.length < ITEMS_PER_PAGE ? (
-                    "No More Assets"
-                  ) : (
-                    "Load More Assets"
-                  )}
-                </Button>
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex flex-col items-center gap-4 mt-12">
+                {/* Page Info */}
+                <div className="text-sm font-mono font-bold text-neutral-600">
+                  Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredAssets.length)} of {filteredAssets.length} papers
+                  {filteredAssets.length !== ipAssets.length && ` (filtered from ${ipAssets.length} total)`}
+                </div>
+
+                {/* Pagination Buttons */}
+                <div className="flex justify-center items-center gap-2 flex-wrap">
+                  <Button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(1)}
+                    className="h-10 px-4 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    First
+                  </Button>
+                  <Button
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(p => p - 1)}
+                    className="h-10 px-4 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </Button>
+
+                  {getPageNumbers().map(page => (
+                    <Button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={`h-10 w-10 border-2 rounded-none font-bold transition-all ${
+                        currentPage === page
+                          ? 'bg-black text-white border-black'
+                          : 'bg-white text-black border-black hover:bg-neutral-100'
+                      }`}
+                    >
+                      {page}
+                    </Button>
+                  ))}
+
+                  <Button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(p => p + 1)}
+                    className="h-10 px-4 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </Button>
+                  <Button
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(totalPages)}
+                    className="h-10 px-4 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Last
+                  </Button>
+                </div>
               </div>
             )}
           </>

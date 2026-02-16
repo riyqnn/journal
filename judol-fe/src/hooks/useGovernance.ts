@@ -7,7 +7,7 @@ import GovernanceDAOABI from '@/contracts/abis/GovernanceDAO.json';
 const GOVERNANCE_DAO_ADDRESS = import.meta.env.VITE_GOVERNANCE_DAO_ADDRESS as `0x${string}`;
 
 if (!GOVERNANCE_DAO_ADDRESS) {
-  console.error("❌ VITE_GOVERNANCE_DAO_ADDRESS is missing in .env!");
+  console.error("VITE_GOVERNANCE_DAO_ADDRESS is missing in .env!");
 }
 
 // Extract ABI
@@ -82,7 +82,8 @@ export const useGovernance = () => {
   };
 
   /**
-   * Get total proposal count and fetch all proposals
+   * Get total proposal count and fetch all proposals using events
+   * Uses ProposalCreated events to efficiently fetch proposals without ID scanning
    */
   const getAllProposals = async (): Promise<Proposal[]> => {
     if (!GOVERNANCE_DAO_ADDRESS) {
@@ -93,32 +94,55 @@ export const useGovernance = () => {
       const provider = getProvider();
       const contract = new ethers.Contract(GOVERNANCE_DAO_ADDRESS, GOVERNANCE_DAO_ABI, provider);
 
-      // First, try to get the actual proposal count
-      let maxId = 20; // Default max to check (increase if you have more proposals)
-      try {
-        // Try to get proposal count from contract
-        const countResult = await contract.proposalCount();
-        maxId = Number(countResult);
-        console.log("Proposal count from contract:", maxId);
-      } catch (e) {
-        // If proposalCount() doesn't exist, scan for proposals
-        console.log("Scanning for proposals up to ID 20...");
+      console.log("🔍 Fetching proposals using ProposalCreated events...");
+
+      // Query ProposalCreated events to get actual proposal IDs
+      // This is MUCH more efficient than scanning IDs 1-100
+      const proposalCreatedFilter = contract.filters.ProposalCreated();
+      const events = await contract.queryFilter(proposalCreatedFilter, -100000); // Last ~100k blocks (~3 days on Arbitrum)
+
+      console.log(`✅ Found ${events.length} ProposalCreated events`);
+
+      if (events.length === 0) {
+        console.log("⚠️ No ProposalCreated events found, returning empty array");
+        return [];
       }
 
-      // Proposal IDs typically start from 1 (not 0)
-      // Only try to fetch from 1 to maxId
-      const proposalIds = Array.from({ length: maxId }, (_, i) => i + 1);
+      // Extract proposal IDs from events
+      const proposalIds = events
+        .map(e => {
+          try {
+            return Number(e.args?.proposalId);
+          } catch {
+            return null;
+          }
+        })
+        .filter((id): id is number => id !== null && !isNaN(id));
 
-      const proposals = await Promise.all(
-        proposalIds.map(id => getProposal(id))
-      );
+      // Remove duplicates and sort
+      const uniqueIds = Array.from(new Set(proposalIds)).sort((a, b) => b - a); // Descending order
+
+      console.log(`📋 Fetching details for ${uniqueIds.length} unique proposals...`);
+
+      // Fetch proposal details in batches of 10 to avoid RPC overload
+      const batchSize = 10;
+      const proposals: (Proposal | null)[] = [];
+
+      for (let i = 0; i < uniqueIds.length; i += batchSize) {
+        const batch = uniqueIds.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map(id => getProposal(id))
+        );
+        proposals.push(...batchResults);
+        console.log(`⏳ Batch ${Math.ceil((i + batchSize) / batchSize)} of ${Math.ceil(uniqueIds.length / batchSize)}`);
+      }
 
       const validProposals = proposals.filter((p): p is Proposal => p !== null);
-      console.log("Found", validProposals.length, "valid proposals out of", maxId, "checked");
+      console.log(`✅ Successfully fetched ${validProposals.length} valid proposals`);
 
       return validProposals;
     } catch (error) {
-      console.error("Error fetching all proposals:", error);
+      console.error("❌ Error fetching proposals via events:", error);
       return [];
     }
   };
@@ -136,6 +160,7 @@ export const useGovernance = () => {
       const contract = new ethers.Contract(GOVERNANCE_DAO_ADDRESS, GOVERNANCE_DAO_ABI, provider);
 
       const proposal = await contract.getProposal(proposalId);
+
       return {
         id: proposal[0],
         title: proposal[1],
@@ -167,9 +192,28 @@ export const useGovernance = () => {
   };
 
   /**
+   * Check if user has already voted on a proposal
+   */
+  const hasVoted = async (proposalId: number, voterAddress: string): Promise<boolean> => {
+    if (!GOVERNANCE_DAO_ADDRESS || !voterAddress) {
+      return false;
+    }
+
+    try {
+      const provider = getProvider();
+      const contract = new ethers.Contract(GOVERNANCE_DAO_ADDRESS, GOVERNANCE_DAO_ABI, provider);
+      const hasVotedFlag = await contract.hasVoted(proposalId, voterAddress);
+      return hasVotedFlag;
+    } catch (error) {
+      console.error("Error checking vote status:", error);
+      return false;
+    }
+  };
+
+  /**
    * Vote on a proposal
    */
-  const vote = async (proposalId: number, support: boolean) => {
+  const vote = async (proposalId: number, support: boolean, voterAddress?: string) => {
     if (!walletClient) {
       toast.error("Wallet not connected!");
       return { success: false };
@@ -178,6 +222,16 @@ export const useGovernance = () => {
     if (!GOVERNANCE_DAO_ADDRESS) {
       toast.error("Governance contract not configured!");
       return { success: false };
+    }
+
+    // Check if user already voted
+    const checkAddress = voterAddress || (walletClient as any).account?.address;
+    if (checkAddress) {
+      const alreadyVoted = await hasVoted(proposalId, checkAddress);
+      if (alreadyVoted) {
+        toast.error("You have already voted on this proposal!");
+        return { success: false, error: "Already voted" };
+      }
     }
 
     setIsVoting(true);
@@ -328,6 +382,76 @@ export const useGovernance = () => {
   };
 
   /**
+   * Delegate voting power to another address
+   */
+  const delegateVote = async (delegateAddress: string) => {
+    if (!walletClient) {
+      toast.error("Wallet not connected!");
+      return { success: false };
+    }
+
+    if (!GOVERNANCE_DAO_ADDRESS) {
+      toast.error("Governance contract not configured!");
+      return { success: false };
+    }
+
+    if (!delegateAddress || !delegateAddress.startsWith("0x") || delegateAddress.length !== 42) {
+      toast.error("Invalid delegate address!");
+      return { success: false, error: "Invalid address" };
+    }
+
+    const toastId = toast.loading("Setting up delegation...");
+
+    try {
+      // @ts-ignore
+      const provider = new ethers.BrowserProvider(walletClient.transport);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(GOVERNANCE_DAO_ADDRESS, GOVERNANCE_DAO_ABI, signer);
+
+      toast.loading("Please sign the transaction in your wallet...", { id: toastId });
+
+      const tx = await contract.delegate(delegateAddress);
+      toast.loading("Confirming delegation...", { id: toastId });
+
+      await tx.wait();
+
+      toast.success("Delegation successful!", {
+        id: toastId,
+        description: `Delegated to ${delegateAddress.slice(0, 10)}...`
+      });
+
+      return { success: true, txHash: tx.hash };
+    } catch (error: any) {
+      console.error("Delegation Error:", error);
+
+      let msg = error.message || "Unknown error";
+      if (msg.includes("User rejected")) msg = "Transaction rejected by user";
+
+      toast.error("Delegation Failed", { id: toastId, description: msg });
+      return { success: false, error: msg };
+    }
+  };
+
+  /**
+   * Get minimum quorum required for proposals (in basis points)
+   */
+  const getMinQuorum = async (): Promise<number> => {
+    if (!GOVERNANCE_DAO_ADDRESS) {
+      return 7500; // Default 75%
+    }
+
+    try {
+      const provider = getProvider();
+      const contract = new ethers.Contract(GOVERNANCE_DAO_ADDRESS, GOVERNANCE_DAO_ABI, provider);
+      const minQuorum = await contract.minQuorumBps();
+      return Number(minQuorum);
+    } catch (error) {
+      console.error("Error fetching min quorum:", error);
+      return 7500; // Default 75%
+    }
+  };
+
+  /**
    * Get user's voting power (USDC balance)
    * Falls back to direct USDC balance if governance contract function fails
    */
@@ -370,12 +494,15 @@ export const useGovernance = () => {
     getAllProposals,
     getProposal,
     getProposals,
+    hasVoted,
     vote,
     isVoting,
     createProposal,
     isCreating,
     executeProposal,
+    delegateVote,
     getVotingPower,
+    getMinQuorum,
     contractAddress: GOVERNANCE_DAO_ADDRESS,
   };
 };

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, XCircle, AlertTriangle, DollarSign, Award, BookOpen, Clock, ArrowRight, BrainCircuit, Database, FileText, ShieldCheck, Loader2, Wallet, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,21 +8,43 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { useAccount } from "wagmi";
 import { useContract, PaperMetadata, PaperStatus } from "@/hooks/useContract";
-import { usePapersByStatus, useVerifierStats, useUSDCBalance } from "@/hooks/useContractQuery";
+import { usePapersByStatus, useVerifierStats, useUSDCBalance, useUserVerifications, useRejectedPapers } from "@/hooks/useContractQuery";
 import { useVerifier } from "@/hooks/useVerifier";
 import { PRICING } from "@/config/pricing";
 
 export default function VerifyPage() {
     const { address } = useAccount();
-    const { updatePaperStatus } = useContract();
+    const { updatePaperStatus, getPaperAIScore } = useContract();
     const { verifyPaper, claimReward, isVerifier, registerVerifier, isVerifying, isClaiming } = useVerifier();
+    const queryClient = useQueryClient();
 
     // Use React Query for optimized data fetching with background refresh
     const { data: tasks = [], isLoading: isLoadingTasks, refetch: refetchTasks, isRefetching: isRefetchingTasks } = usePapersByStatus(PaperStatus.Draft);
     const { data: verifierStats, isLoading: isLoadingStats, refetch: refetchStats } = useVerifierStats(address);
     const { data: balanceData, isLoading: isLoadingBalance } = useUSDCBalance(address);
 
+    // New hooks for history tab
+    const { data: userVerifications = [], isLoading: isLoadingUserHistory } = useUserVerifications(address);
+    const { data: rejectedPapers = [], isLoading: isLoadingRejected, refetch: refetchRejected } = useRejectedPapers();
+
     const [isRegistering, setIsRegistering] = useState(false);
+
+    // Pagination state for queue
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 6;
+
+    // Pagination state for history
+    const [historyPage, setHistoryPage] = useState(1);
+    const HISTORY_ITEMS_PER_PAGE = 10;
+
+    // AI scores cache
+    const [aiScores, setAiScores] = useState<Record<string, number>>({});
+
+    // Track papers being verified for optimistic UI updates
+    const [verifyingTokenIds, setVerifyingTokenIds] = useState<Set<string>>(new Set());
+
+    // Track processing tokens to prevent duplicate transactions
+    const processingRef = useRef<Record<string, boolean>>({});
 
     // Computed stats from blockchain data with useMemo for performance
     const reviewerStats = useMemo(() => {
@@ -56,6 +79,74 @@ export default function VerifyPage() {
         return !address || (isLoadingStats && isLoadingBalance);
     }, [address, isLoadingStats, isLoadingBalance]);
 
+    // Fetch AI scores for all papers in queue
+    useEffect(() => {
+        const fetchScores = async () => {
+            const scores: Record<string, number> = {};
+            await Promise.all(
+                tasks.map(async (task) => {
+                    const score = await getPaperAIScore(task.ipfsHash);
+                    if (score !== null) {
+                        scores[task.tokenId] = score;
+                    }
+                })
+            );
+            setAiScores(scores);
+        };
+        if (tasks.length > 0) {
+            fetchScores();
+        }
+    }, [tasks, getPaperAIScore]);
+
+    // Pagination logic for queue
+    const totalPages = Math.ceil(tasks.length / ITEMS_PER_PAGE);
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const displayTasks = useMemo(() =>
+        tasks.slice(startIndex, startIndex + ITEMS_PER_PAGE),
+        [tasks, startIndex]
+    );
+
+    // Filter out papers currently being verified (optimistic UI update)
+    const visibleTasks = useMemo(() =>
+        displayTasks.filter(task => !verifyingTokenIds.has(task.tokenId)),
+        [displayTasks, verifyingTokenIds]
+    );
+
+    // Combine history items: user's approved + all rejected
+    const historyItems = useMemo(() => {
+        // Add isRejected flag to rejected papers
+        const rejectedWithFlag = rejectedPapers.map(p => ({
+            ...p,
+            isRejected: true,
+            timestamp: p.mintedAt ? BigInt(new Date(p.mintedAt).getTime() / 1000) : BigInt(0),
+        }));
+
+        // Combine and sort by timestamp descending
+        return [...userVerifications, ...rejectedWithFlag].sort((a, b) => {
+            const timeA = Number(a.timestamp || 0);
+            const timeB = Number(b.timestamp || 0);
+            return timeB - timeA;
+        });
+    }, [userVerifications, rejectedPapers]);
+
+    // Pagination for history
+    const totalHistoryPages = Math.ceil(historyItems.length / HISTORY_ITEMS_PER_PAGE);
+    const historyStartIndex = (historyPage - 1) * HISTORY_ITEMS_PER_PAGE;
+    const displayHistoryItems = useMemo(() =>
+        historyItems.slice(historyStartIndex, historyStartIndex + HISTORY_ITEMS_PER_PAGE),
+        [historyItems, historyStartIndex]
+    );
+
+    // Reset page when search changes (for future search functionality)
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [tasks.length]);
+
+    // Reset history page when data changes
+    useEffect(() => {
+        setHistoryPage(1);
+    }, [historyItems.length]);
+
     // Handle verifier registration
     const handleRegisterVerifier = async () => {
         if (!address) {
@@ -83,19 +174,41 @@ export default function VerifyPage() {
 
     // Handle verification (approve/reject)
     const handleVote = async (tokenId: string, decision: 'APPROVE' | 'REJECT') => {
-        if (!address) {
-            toast.error("Please connect your wallet first");
+        // EARLY RETURN: Prevent duplicate calls
+        if (verifyingTokenIds.has(tokenId) || isVerifying || processingRef.current[tokenId]) {
+            console.log("Already verifying this paper, ignoring duplicate click");
             return;
         }
 
-        // Check if registered as verifier
-        const registered = await isVerifier(address);
-        if (!registered) {
-            toast.error("You must register as a verifier first");
-            return;
-        }
+        // Optimistic update FIRST (before any async operations)
+        setVerifyingTokenIds(prev => new Set(prev).add(tokenId));
+        processingRef.current[tokenId] = true;
 
         try {
+            if (!address) {
+                toast.error("Please connect your wallet first");
+                // Remove from verifying set since we failed before blockchain operation
+                setVerifyingTokenIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(tokenId);
+                    return next;
+                });
+                return;
+            }
+
+            // Check if registered as verifier
+            const registered = await isVerifier(address);
+            if (!registered) {
+                toast.error("You must register as a verifier first");
+                // Remove from verifying set since we failed before blockchain operation
+                setVerifyingTokenIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(tokenId);
+                    return next;
+                });
+                return;
+            }
+
             // 1. Submit verification to blockchain
             const comment = decision === 'APPROVE'
                 ? "Paper meets quality standards and passes verification"
@@ -105,44 +218,71 @@ export default function VerifyPage() {
 
             if (!result.success) {
                 toast.error(result.error || "Verification failed");
+                // Remove from verifying set since verification failed
+                setVerifyingTokenIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(tokenId);
+                    return next;
+                });
                 return;
             }
 
-            // 2. Update paper status (if admin/verifier role)
-            const newStatus = decision === 'APPROVE' ? PaperStatus.Verified : PaperStatus.Rejected;
-            const statusResult = await updatePaperStatus(BigInt(tokenId), newStatus);
-
-            if (!statusResult.success) {
-                toast.warning("Verification submitted, but status update failed. Contact admin.");
-            }
-
-            // 3. Claim reward (50 USDC)
+            // 2. Claim reward immediately after verification
             const rewardResult = await claimReward(BigInt(tokenId));
 
             if (rewardResult.success) {
-                toast.success(decision === 'APPROVE' ? `Paper Verified! +${PRICING.VERIFICATION_REWARD}` : "Paper Rejected. Reward claimed.", {
+                const aiScore = aiScores[tokenId] || 0;
+                const reward = PRICING.getRewardForScore(aiScore);
+                toast.success(decision === 'APPROVE' ? `Paper Verified! +${reward}` : "Paper Rejected. Reward claimed.", {
                     description: decision === 'APPROVE'
                         ? "License upgraded to Commercial (PIL). Asset is now verified."
                         : "License downgraded. Moved to rejected pool.",
                 });
             } else {
                 toast.success("Verification submitted!", {
-                    description: rewardResult.error || "You can claim your reward from the VerifierRegistry contract.",
+                    description: rewardResult.error || "Reward will be available to claim.",
                 });
             }
 
-            // Refetch stats to get updated data (React Query handles this in background)
+            // Refetch stats and queue to get updated data
             refetchStats();
 
-        } catch (error) {
+            // Defer query invalidation to avoid setState during render
+            setTimeout(() => {
+              // Invalidate queries to force immediate cache refresh
+              queryClient.invalidateQueries({ queryKey: ['papers', 'status', PaperStatus.Draft] });
+              queryClient.invalidateQueries({ queryKey: ['verifier', 'stats', address] }); // Force refresh stats
+              queryClient.invalidateQueries({ queryKey: ['verifier', 'history', address] });
+              queryClient.invalidateQueries({ queryKey: ['usdc', 'balance', address] }); // Force refresh USDC balance
+            }, 0);
+
+        } catch (error: any) {
             console.error("Error handling vote:", error);
+
+            // Check if already verified
+            if (error.message?.includes("Already verified") || error.reason?.includes("Already verified")) {
+                toast.info("Paper Already Verified", {
+                    description: "This paper has been verified. Refreshing the queue..."
+                });
+                // Defer query invalidation to avoid setState during render
+                setTimeout(() => {
+                  // Force refetch to update UI
+                  queryClient.invalidateQueries({ queryKey: ['papers', 'status', PaperStatus.Draft] });
+                }, 0);
+                // Don't remove from verifying set - the paper is already verified
+                return;
+            }
+
             toast.error("Failed to process verification");
+        } finally {
+            // Clean up processing flag
+            processingRef.current[tokenId] = false;
         }
     };
 
     // Handle manual refresh
     const handleRefresh = async () => {
-        await Promise.all([refetchTasks(), refetchStats()]);
+        await Promise.all([refetchTasks(), refetchStats(), refetchRejected()]);
     };
 
     return (
@@ -318,14 +458,28 @@ export default function VerifyPage() {
                                 <h3 className="text-3xl font-black uppercase mb-2">Wallet Not Connected</h3>
                                 <p className="text-xl font-bold text-neutral-500">Please connect your wallet to view verification tasks</p>
                             </div>
-                        ) : tasks.length === 0 ? (
+                        ) : visibleTasks.length === 0 ? (
                             <div className="text-center py-20 bg-white border-4 border-black border-dashed">
-                                <CheckCircle2 className="h-16 w-16 text-black mx-auto mb-4" />
-                                <h3 className="text-3xl font-black uppercase mb-2">All Caught Up!</h3>
-                                <p className="text-xl font-bold text-neutral-500">No pending verifications. Check back later.</p>
+                                {verifyingTokenIds.size > 0 ? (
+                                    <>
+                                        <Loader2 className="h-16 w-16 text-black mx-auto mb-4 animate-spin" />
+                                        <h3 className="text-3xl font-black uppercase mb-2">Processing Verification...</h3>
+                                        <p className="text-xl font-bold text-neutral-500">Please wait while the transaction completes</p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <CheckCircle2 className="h-16 w-16 text-black mx-auto mb-4" />
+                                        <h3 className="text-3xl font-black uppercase mb-2">All Caught Up!</h3>
+                                        <p className="text-xl font-bold text-neutral-500">No pending verifications. Check back later.</p>
+                                    </>
+                                )}
                             </div>
                         ) : (
-                            tasks.map((task) => (
+                            visibleTasks.map((task) => {
+                                const aiScore = aiScores[task.tokenId] || 0;
+                                const reward = PRICING.getRewardForScore(aiScore);
+
+                                return (
                                 <Card key={task.tokenId} className="group overflow-visible border-2 border-black rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] bg-white relative">
 
 
@@ -339,6 +493,11 @@ export default function VerifyPage() {
                                                 <Badge variant="outline" className="text-xs font-bold font-mono border-2 border-black bg-yellow-200 rounded-none px-2 py-0.5">
                                                     TOKEN #{task.tokenId}
                                                 </Badge>
+                                                {aiScore > 0 && (
+                                                    <Badge variant="outline" className="text-xs font-bold font-mono border-2 border-black bg-blue-100 rounded-none px-2 py-0.5">
+                                                        AI SCORE: {aiScore}/100
+                                                    </Badge>
+                                                )}
                                             </div>
                                             <h3 className="text-3xl font-black uppercase leading-none">{task.title}</h3>
                                             <p className="font-bold text-neutral-500 text-sm">
@@ -347,11 +506,16 @@ export default function VerifyPage() {
                                         </div>
 
                                         <div className="flex-shrink-0">
-                                            <div className="bg-green-100 border-2 border-black p-3 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] min-w-[120px]">
+                                            <div className={`border-2 border-black p-3 text-center shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] min-w-[120px] ${aiScore >= 80 ? 'bg-green-100' : aiScore >= 70 ? 'bg-yellow-100' : 'bg-orange-100'}`}>
                                                 <div className="text-xs font-bold uppercase mb-1">Bounty</div>
                                                 <div className="text-2xl font-black font-mono flex items-center justify-center gap-1">
-                                                    <DollarSign className="h-5 w-5" /> {PRICING.VERIFICATION_REWARD.replace(' USDC', '')} <span className="text-sm">USDC</span>
+                                                    <DollarSign className="h-5 w-5" /> {reward.replace(' USDC', '')} <span className="text-sm">USDC</span>
                                                 </div>
+                                                {aiScore > 0 && (
+                                                    <div className="text-xs font-bold text-neutral-600 mt-1">
+                                                        {aiScore >= 90 ? 'EXCELLENT' : aiScore >= 80 ? 'HIGH' : aiScore >= 70 ? 'GOOD' : 'STANDARD'} QUALITY
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -435,21 +599,152 @@ export default function VerifyPage() {
                                                 onClick={() => handleVote(task.tokenId, 'APPROVE')}
                                             >
                                                 {isVerifying ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <CheckCircle2 className="mr-2 h-5 w-5" />}
-                                                {isVerifying ? "VERIFYING..." : `APPROVE & EARN ${PRICING.VERIFICATION_REWARD}`}
+                                                {isVerifying ? "VERIFYING..." : `APPROVE & EARN ${reward}`}
                                             </Button>
                                         </div>
                                     </div>
 
                                 </Card>
-                            ))
+                                );
+                            })
+                        )}
+
+                        {/* Pagination for Queue */}
+                        {totalPages > 1 && (
+                            <div className="flex justify-center items-center gap-4 mt-8">
+                                <Button
+                                    disabled={currentPage === 1}
+                                    onClick={() => setCurrentPage(p => p - 1)}
+                                    className="h-10 px-6 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white hover:translate-x-[1px] hover:translate-y-[1px] transition-all disabled:opacity-50"
+                                >
+                                    Previous
+                                </Button>
+                                <span className="flex items-center px-4 font-mono font-bold">
+                                    Page {currentPage} of {totalPages}
+                                </span>
+                                <Button
+                                    disabled={currentPage >= totalPages}
+                                    onClick={() => setCurrentPage(p => p + 1)}
+                                    className="h-10 px-6 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white hover:translate-x-[1px] hover:translate-y-[1px] transition-all disabled:opacity-50"
+                                >
+                                    Next
+                                </Button>
+                            </div>
                         )}
                     </TabsContent>
 
                     <TabsContent value="history">
-                        <div className="py-20 text-center border-4 border-black border-dashed bg-neutral-50">
-                            <p className="text-xl font-bold text-neutral-500 uppercase">History Module Coming Soon</p>
-                            <p className="text-sm text-neutral-400 mt-2">View your past verifications and rewards</p>
-                        </div>
+                        {isLoadingUserHistory || isLoadingRejected ? (
+                            <div className="flex flex-col items-center justify-center py-24 space-y-6 border-2 border-black border-dashed bg-white">
+                                <Loader2 className="h-16 w-16 animate-spin text-black" />
+                                <p className="text-xl font-bold font-mono uppercase tracking-widest">Loading verification history...</p>
+                            </div>
+                        ) : historyItems.length === 0 ? (
+                            <div className="text-center py-20 bg-white border-4 border-black border-dashed">
+                                <Clock className="h-16 w-16 text-black mx-auto mb-4" />
+                                <h3 className="text-3xl font-black uppercase mb-2">No History Yet</h3>
+                                <p className="text-xl font-bold text-neutral-500">Your verification history will appear here</p>
+                            </div>
+                        ) : (
+                            <>
+                                {/* History Header */}
+                                <div className="mb-6 flex justify-between items-center">
+                                    <h2 className="text-2xl font-black uppercase">Verification History ({historyItems.length})</h2>
+                                    <div className="text-sm font-mono font-bold text-neutral-600">
+                                        Showing {displayHistoryItems.length} of {historyItems.length}
+                                    </div>
+                                </div>
+
+                                {/* History Cards */}
+                                <div className="space-y-6">
+                                    {displayHistoryItems.map((item: any) => {
+                                        const isRejected = item.isRejected;
+                                        const itemAIScore = item.aiScore || aiScores[item.tokenId] || 0;
+                                        const itemReward = PRICING.getRewardForScore(itemAIScore);
+
+                                        return (
+                                            <Card key={item.tokenId} className={`border-2 ${isRejected ? 'border-red-500 bg-red-50' : 'border-black bg-white'} rounded-none shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]`}>
+                                                <div className="p-6 flex flex-col md:flex-row justify-between items-start gap-4">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                                            <h3 className="text-xl font-black uppercase">{item.paper?.title || item.title}</h3>
+                                                            {isRejected ? (
+                                                                <Badge className="bg-red-600 text-white border-2 border-black rounded-none">
+                                                                    <XCircle className="w-4 h-4 mr-1" /> REJECTED
+                                                                </Badge>
+                                                            ) : (
+                                                                <Badge className="bg-green-500 text-black border-2 border-black rounded-none">
+                                                                    <CheckCircle2 className="w-4 h-4 mr-1" /> APPROVED
+                                                                </Badge>
+                                                            )}
+                                                            <Badge variant="outline" className="text-xs font-bold font-mono border-2 border-black bg-white rounded-none">
+                                                                TOKEN #{item.tokenId}
+                                                            </Badge>
+                                                            {itemAIScore > 0 && (
+                                                                <Badge variant="outline" className="text-xs font-bold font-mono border-2 border-black bg-blue-100 rounded-none">
+                                                                    AI: {itemAIScore}/100
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-4 text-sm text-neutral-600">
+                                                            <span className="font-bold">
+                                                                By: {item.paper?.author || item.author || "Unknown"}
+                                                            </span>
+                                                            <span>•</span>
+                                                            <span className="font-mono">
+                                                                {item.timestamp
+                                                                    ? new Date(Number(item.timestamp) * 1000).toLocaleString()
+                                                                    : (item.mintedAt ? new Date(item.mintedAt).toLocaleDateString() : "Unknown date")
+                                                                }
+                                                            </span>
+                                                        </div>
+                                                        {isRejected && (
+                                                            <p className="text-sm font-bold text-red-600 mt-2">
+                                                                This paper was rejected and moved to the rejected pool
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <div className="text-xs font-bold uppercase text-neutral-500 mb-1">Reward</div>
+                                                        <div className={`text-2xl font-black font-mono ${isRejected ? 'text-red-600 line-through' : 'text-green-600'}`}>
+                                                            {itemReward}
+                                                        </div>
+                                                        {isRejected && (
+                                                            <div className="text-xs font-bold text-red-600 mt-1">
+                                                                No reward
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </Card>
+                                        );
+                                    })}
+                                </div>
+
+                                {/* Pagination for History */}
+                                {totalHistoryPages > 1 && (
+                                    <div className="flex justify-center items-center gap-4 mt-8">
+                                        <Button
+                                            disabled={historyPage === 1}
+                                            onClick={() => setHistoryPage(p => p - 1)}
+                                            className="h-10 px-6 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white hover:translate-x-[1px] hover:translate-y-[1px] transition-all disabled:opacity-50"
+                                        >
+                                            Previous
+                                        </Button>
+                                        <span className="flex items-center px-4 font-mono font-bold">
+                                            Page {historyPage} of {totalHistoryPages}
+                                        </span>
+                                        <Button
+                                            disabled={historyPage >= totalHistoryPages}
+                                            onClick={() => setHistoryPage(p => p + 1)}
+                                            className="h-10 px-6 border-2 border-black bg-white text-black rounded-none font-bold hover:bg-black hover:text-white hover:translate-x-[1px] hover:translate-y-[1px] transition-all disabled:opacity-50"
+                                        >
+                                            Next
+                                        </Button>
+                                    </div>
+                                )}
+                            </>
+                        )}
                     </TabsContent>
                 </Tabs>
 

@@ -3,9 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Vote, Users, Coins, Clock, CheckCircle2, XCircle, Megaphone, ArrowRight, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useGovernanceProposals } from "@/hooks/useContractQuery";
+import { useGovernanceProposals } from "@/hooks/useGovernanceIndexer";
+import { useGovernanceStats } from "@/hooks/useContractQuery";
 import { ProposalType, ProposalStatus } from "@/hooks/useGovernance";
-import { useMemo } from "react";
 
 // Config dengan style Neo-Brutalist (Solid colors, black borders)
 const typeConfig = {
@@ -41,19 +41,15 @@ const getTimeLeft = (endTime: bigint): string => {
 export const GovernanceDashboard = () => {
   const navigate = useNavigate();
   const { data: proposals = [], isLoading, error } = useGovernanceProposals();
+  const { data: stats, isLoading: statsLoading } = useGovernanceStats();
 
-  // Calculate stats from real data
-  const stats = useMemo(() => {
-    const activeProposals = proposals.filter(p => p.status === ProposalStatus.Active);
-    const totalVotes = proposals.reduce((sum, p) => sum + Number(p.totalVotes), 0);
-
-    return {
-      activeProposals: proposals.length,
-      activeVoters: Math.floor(totalVotes * 0.8), // Estimate unique voters
-      treasury: "125,000", // TODO: Get from contract
-      participation: proposals.length > 0 ? "89%" : "0%", // TODO: Calculate real participation
-    };
-  }, [proposals]);
+  // Default stats in case data is not loaded yet
+  const displayStats = stats || {
+    activeProposals: 0,
+    activeVoters: 0,
+    treasury: "125K",
+    participation: "0%",
+  };
 
   return (
     <section className="py-20 bg-white border-black font-sans">
@@ -79,10 +75,10 @@ export const GovernanceDashboard = () => {
         {/* Stats Cards - Brutalist Boxes */}
         <div className="grid md:grid-cols-4 gap-6 mb-16">
           {[
-            { label: "Active Voters", value: stats.activeVoters.toLocaleString(), icon: Users, bg: "bg-blue-100" },
-            { label: "Active Proposals", value: stats.activeProposals.toString(), icon: Vote, bg: "bg-purple-100" },
-            { label: "Treasury (USDC)", value: stats.treasury, icon: Coins, bg: "bg-yellow-100" },
-            { label: "Participation", value: stats.participation, icon: CheckCircle2, bg: "bg-green-100" },
+            { label: "Active Voters", value: displayStats.activeVoters.toLocaleString(), icon: Users, bg: "bg-blue-100" },
+            { label: "Active Proposals", value: displayStats.activeProposals.toString(), icon: Vote, bg: "bg-purple-100" },
+            { label: "Treasury (USDC)", value: displayStats.treasury, icon: Coins, bg: "bg-yellow-100" },
+            { label: "Participation", value: displayStats.participation, icon: CheckCircle2, bg: "bg-green-100" },
           ].map((stat, idx) => (
             <div key={idx} className={`p-6 border-2 border-black shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all ${stat.bg}`}>
               <div className="flex items-center justify-between mb-4 border-b-2 border-black pb-2">

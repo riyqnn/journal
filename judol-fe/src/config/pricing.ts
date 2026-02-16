@@ -3,6 +3,21 @@
  * Single source of truth for all pricing-related values
  */
 
+/**
+ * Calculate verification reward based on AI Trust Score
+ * Tiered reward structure:
+ * - Score 90-100: 100 USDC
+ * - Score 80-89: 75 USDC
+ * - Score 70-79: 50 USDC
+ * - Score <70: 25 USDC
+ */
+export const calculateVerificationReward = (aiScore: number): number => {
+  if (aiScore >= 90) return 100;      // Score 90-100: 100 USDC
+  if (aiScore >= 80) return 75;       // Score 80-89: 75 USDC
+  if (aiScore >= 70) return 50;       // Score 70-79: 50 USDC
+  return 25;                          // Score <70: 25 USDC
+};
+
 export const PRICING = {
   // Price values
   VERIFIED_PAPER_PRICE: "50 USDC",
@@ -23,6 +38,7 @@ export const PRICING = {
   getDatasetPrice: (): string => PRICING.DATASET_PRICE,
   getVerificationReward: (): string => PRICING.VERIFICATION_REWARD,
   getMintingFee: (): string => PRICING.MINTING_FEE,
+  getRewardForScore: (score: number): string => `${calculateVerificationReward(score)} USDC`,
 
   // Numeric values (for calculations)
   VERIFIED_PAPER_PRICE_NUMERIC: 50, // in USDC (6 decimals)

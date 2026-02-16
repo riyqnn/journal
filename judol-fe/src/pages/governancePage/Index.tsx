@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Vote, Users, Coins, Clock, CheckCircle2, XCircle, Search, Plus, ArrowRight, UserCheck, Copy, ShieldCheck, FileText, Send, Megaphone, Loader2, RefreshCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,8 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useGovernance, Proposal, ProposalType, ProposalStatus } from "@/hooks/useGovernance";
-import { useGovernanceProposals, useVotingPower } from "@/hooks/useContractQuery";
+import { useGovernanceProposals, calculateVotingStats } from "@/hooks/useGovernanceIndexer";
+import { useVotingPower } from "@/hooks/useContractQuery";
 import { useAccount } from "wagmi";
 import { toast } from "sonner";
 
@@ -33,16 +35,19 @@ const statusConfig = {
 
 export default function GovernancePage() {
     const { address } = useAccount();
-    const { vote, isVoting, createProposal, isCreating } = useGovernance();
+    const { vote, isVoting, createProposal, isCreating, executeProposal, delegateVote } = useGovernance();
+    const queryClient = useQueryClient();
 
     // Use React Query for optimized data fetching with background refresh
-    const { data: proposals = [], isLoading: isLoadingProposals, refetch: refetchProposals, isRefetching: isRefetchingProposals } = useGovernanceProposals();
+    const { data: proposals = [], isLoading: isLoadingProposals, refetch: refetchProposals, isRefetching: isRefetchingProposals } = useGovernanceProposals(true); // Enable auto-refresh
     const { data: votingPower = 0n, isLoading: isLoadingVotingPower, refetch: refetchVotingPower } = useVotingPower(address);
 
     const [activeTab, setActiveTab] = useState("active");
     const [searchQuery, setSearchQuery] = useState("");
     const [delegateAddress, setDelegateAddress] = useState("");
     const [proposalOpen, setProposalOpen] = useState(false);
+    const [delegationOpen, setDelegationOpen] = useState(false);
+    const [isDelegating, setIsDelegating] = useState(false);
     const [newProp, setNewProp] = useState({ title: "", type: "0", desc: "" });
 
     // Initial load state (only true on first load, not on background refetch)
@@ -50,7 +55,7 @@ export default function GovernancePage() {
 
     // Computed stats with useMemo for performance
     const stats = useMemo(() => {
-        const activeProposals = proposals.filter(p => p.status === ProposalStatus.Active);
+        const activeProposals = proposals.filter(p => Number(p.status) === ProposalStatus.Active);
         const totalVotes = proposals.reduce((sum, p) => sum + Number(p.totalVotes), 0);
         return {
             activeProposals: activeProposals.length,
@@ -64,9 +69,10 @@ export default function GovernancePage() {
     const filteredProposals = useMemo(() => {
         return proposals.filter(p => {
             const matchesTab = activeTab === "all" ? true :
-                activeTab === "active" ? p.status === ProposalStatus.Active :
-                activeTab === "passed" ? (p.status === ProposalStatus.Passed || p.status === ProposalStatus.Executed) :
-                p.status === ProposalStatus.Rejected;
+                activeTab === "active" ? Number(p.status) === ProposalStatus.Active :
+                activeTab === "passed" ? (Number(p.status) === ProposalStatus.Passed || Number(p.status) === ProposalStatus.Executed) :
+                activeTab === "rejected" ? Number(p.status) === ProposalStatus.Rejected :
+                true; // fallback for "all"
             const matchesSearch = p.title.toLowerCase().includes(searchQuery.toLowerCase());
             return matchesTab && matchesSearch;
         });
@@ -87,12 +93,18 @@ export default function GovernancePage() {
         );
 
         if (result.success) {
+            // Batch state updates together
             setProposalOpen(false);
             setNewProp({ title: "", type: "0", desc: "" });
-            // Refetch proposals to get updated list
-            refetchProposals();
+
+            // Defer query invalidation to avoid setState during render
+            setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: ['governance', 'proposals'] });
+                queryClient.invalidateQueries({ queryKey: ['governance', 'stats'] });
+                refetchProposals();
+            }, 0);
         }
-    }, [newProp, createProposal, refetchProposals]);
+    }, [newProp, createProposal, refetchProposals, queryClient]);
 
     // Handle vote
     const handleVote = useCallback(async (proposalId: number, support: boolean) => {
@@ -103,15 +115,61 @@ export default function GovernancePage() {
 
         const result = await vote(proposalId, support);
         if (result.success) {
-            // Refetch proposals and voting power to see updated counts
-            await Promise.all([refetchProposals(), refetchVotingPower()]);
+            // Defer query invalidation to avoid setState during render
+            setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: ['governance', 'proposals'] });
+                queryClient.invalidateQueries({ queryKey: ['governance', 'stats'] });
+                queryClient.invalidateQueries({ queryKey: ['governance', 'votingPower', address] });
+                refetchProposals();
+                refetchVotingPower();
+            }, 0);
         }
-    }, [address, vote, refetchProposals, refetchVotingPower]);
+    }, [address, vote, refetchProposals, refetchVotingPower, queryClient]);
+
+    // Handle delegation
+    const handleDelegate = useCallback(async () => {
+        if (!address) {
+            toast.error("Please connect your wallet first");
+            return;
+        }
+
+        if (!delegateAddress) {
+            toast.error("Please enter a delegate address");
+            return;
+        }
+
+        setIsDelegating(true);
+        const result = await delegateVote(delegateAddress);
+
+        if (result.success) {
+            setDelegateAddress("");
+            setDelegationOpen(false);
+
+            // Defer query invalidation to avoid setState during render
+            setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: ['governance', 'votingPower', address] });
+                refetchVotingPower();
+            }, 0);
+        }
+        setIsDelegating(false);
+    }, [address, delegateAddress, delegateVote, refetchVotingPower, queryClient]);
 
     // Handle manual refresh
     const handleRefresh = useCallback(async () => {
         await Promise.all([refetchProposals(), refetchVotingPower()]);
     }, [refetchProposals, refetchVotingPower]);
+
+    // Handle execute proposal
+    const handleExecuteProposal = useCallback(async (proposalId: number) => {
+        const result = await executeProposal(proposalId);
+        if (result.success) {
+            // Defer query invalidation to avoid setState during render
+            setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: ['governance', 'proposals'] });
+                refetchProposals();
+            }, 0);
+        }
+    }, [executeProposal, refetchProposals, queryClient]);
 
     return (
         <div className="min-h-screen bg-white pb-20 font-sans selection:bg-yellow-300 selection:text-black">
@@ -271,10 +329,8 @@ export default function GovernancePage() {
                             {/* Proposal Cards */}
                             {filteredProposals.length > 0 ? filteredProposals.map((proposal) => {
                                 const StatusIcon = statusConfig[proposal.status].icon;
-                                const votePercentage = proposal.totalVotes > 0n ? Number((proposal.votesFor * 100n) / proposal.totalVotes) : 0;
-                                const participationPercentage = proposal.requiredVotes > 0n ? Number((proposal.totalVotes * 100n) / proposal.requiredVotes) : 0;
-                                const timeLeft = proposal.endTime > 0n ? Math.max(0, Number(proposal.endTime) - Math.floor(Date.now() / 1000)) : 0;
-                                const daysLeft = Math.ceil(timeLeft / (24 * 60 * 60));
+                                // Use the indexer's calculateVotingStats for accurate data
+                                const stats = calculateVotingStats(proposal);
 
                                 return (
                                     <Card key={proposal.id.toString()} className="group relative border-2 border-black rounded-none shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] bg-white overflow-hidden hover:-translate-y-1 transition-transform duration-200">
@@ -301,10 +357,10 @@ export default function GovernancePage() {
                                                     </p>
                                                 </div>
 
-                                                {proposal.status === ProposalStatus.Active && (
+                                                {stats.isActive && (
                                                     <div className="flex-shrink-0 text-center border-2 border-black bg-white p-2 min-w-[100px] shadow-[4px_4px_0px_0px_rgba(0,0,0,1)]">
                                                         <div className="text-[10px] font-bold uppercase border-b border-black pb-1 mb-1">Time Left</div>
-                                                        <div className="text-xl font-black font-mono text-red-600">{daysLeft}D</div>
+                                                        <div className="text-xl font-black font-mono text-red-600">{stats.timeLeftDisplay}</div>
                                                     </div>
                                                 )}
                                             </div>
@@ -316,10 +372,10 @@ export default function GovernancePage() {
                                                 <div className="space-y-2">
                                                     <div className="flex justify-between text-xs font-black uppercase">
                                                         <span className="text-neutral-500">Current Support</span>
-                                                        <span>{votePercentage.toFixed(1)}%</span>
+                                                        <span>{stats.votePercentage.toFixed(1)}%</span>
                                                     </div>
                                                     <div className="h-4 w-full border-2 border-black bg-white relative">
-                                                        <div className="absolute top-0 left-0 h-full bg-green-500 border-r-2 border-black" style={{ width: `${votePercentage}%` }} />
+                                                        <div className="absolute top-0 left-0 h-full bg-green-500 border-r-2 border-black" style={{ width: `${stats.votePercentage}%` }} />
                                                     </div>
                                                 </div>
 
@@ -327,20 +383,20 @@ export default function GovernancePage() {
                                                 <div className="space-y-2">
                                                     <div className="flex justify-between text-xs font-black uppercase">
                                                         <span className="text-neutral-500">Quorum Progress</span>
-                                                        <span>{participationPercentage.toFixed(1)}%</span>
+                                                        <span>{stats.quorumPercentage.toFixed(1)}%</span>
                                                     </div>
                                                     <div className="h-4 w-full border-2 border-black bg-white relative">
-                                                        <div className="absolute top-0 left-0 h-full bg-blue-500 border-r-2 border-black" style={{ width: `${participationPercentage}%` }} />
+                                                        <div className="absolute top-0 left-0 h-full bg-blue-500 border-r-2 border-black" style={{ width: `${stats.quorumPercentage}%` }} />
                                                     </div>
                                                 </div>
                                             </div>
 
                                             {/* Footer Action */}
-                                            {proposal.status === ProposalStatus.Active && (
+                                            {stats.isActive && (
                                                 <div className="bg-neutral-50 border-t-2 border-black p-4 flex justify-between items-center">
                                                     <div className="text-sm font-bold text-neutral-600">
-                                                        <div>{Number(proposal.votesFor).toLocaleString()} FOR</div>
-                                                        <div>{Number(proposal.votesAgainst).toLocaleString()} AGAINST</div>
+                                                        <div>{stats.votesFor.toLocaleString()} FOR</div>
+                                                        <div>{stats.votesAgainst.toLocaleString()} AGAINST</div>
                                                     </div>
                                                     <div className="flex gap-2">
                                                         <Button
@@ -358,6 +414,20 @@ export default function GovernancePage() {
                                                             {isVoting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                                                         </Button>
                                                     </div>
+                                                </div>
+                                            )}
+
+                                            {/* Execute Action for Passed Proposals */}
+                                            {proposal.status === ProposalStatus.Passed && (
+                                                <div className="bg-green-100 border-t-2 border-black p-4">
+                                                    <Button
+                                                        onClick={() => handleExecuteProposal(Number(proposal.id))}
+                                                        disabled={!address}
+                                                        className="w-full h-10 bg-green-600 text-white border-2 border-black rounded-none font-bold shadow-[4px_4px_0px_0px_rgba(22,163,74,0.3)] hover:bg-green-700 hover:shadow-[4px_4px_0px_0px_rgba(22,163,74,0.5)] transition-all flex items-center justify-center gap-2"
+                                                    >
+                                                        <ArrowRight className="h-4 w-4" />
+                                                        EXECUTE PROPOSAL
+                                                    </Button>
                                                 </div>
                                             )}
                                         </div>
@@ -428,7 +498,7 @@ export default function GovernancePage() {
                         <Separator className="my-6 bg-black h-0.5" />
 
                         {/* DIALOG DELEGASI */}
-                        <Dialog>
+                        <Dialog open={delegationOpen} onOpenChange={setDelegationOpen}>
                             <DialogTrigger asChild>
                                 <Button variant="outline" className="w-full h-12 bg-white text-black border-2 border-black rounded-none font-bold shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:bg-black hover:text-white hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] transition-all">
                                     MANAGE DELEGATION
@@ -447,7 +517,10 @@ export default function GovernancePage() {
                                         <Label className="font-bold uppercase">Delegate Address</Label>
                                         <div className="flex gap-0">
                                             <Input placeholder="0x..." className="border-2 border-black border-r-0 rounded-none h-12 font-mono font-bold focus-visible:ring-0" value={delegateAddress} onChange={(e) => setDelegateAddress(e.target.value)} />
-                                            <Button variant="ghost" size="icon" className="h-12 w-12 border-2 border-black rounded-none bg-neutral-100 hover:bg-black hover:text-white">
+                                            <Button variant="ghost" size="icon" className="h-12 w-12 border-2 border-black rounded-none bg-neutral-100 hover:bg-black hover:text-white" onClick={() => {
+                                                navigator.clipboard.writeText(delegateAddress);
+                                                toast.success("Address copied to clipboard");
+                                            }}>
                                                 <Copy className="h-5 w-5" />
                                             </Button>
                                         </div>
@@ -459,8 +532,20 @@ export default function GovernancePage() {
                                 </div>
 
                                 <DialogFooter className="p-6 pt-0">
-                                    <Button type="submit" onClick={() => toast.success("Delegation feature coming soon!")} className="w-full h-12 bg-black text-white border-2 border-black rounded-none font-black shadow-[4px_4px_0px_0px_rgba(128,128,128,0.5)] hover:bg-white hover:text-black hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all">
-                                        CONFIRM DELEGATION
+                                    <Button 
+                                        type="submit" 
+                                        onClick={handleDelegate} 
+                                        disabled={isDelegating || !delegateAddress}
+                                        className="w-full h-12 bg-black text-white border-2 border-black rounded-none font-black shadow-[4px_4px_0px_0px_rgba(128,128,128,0.5)] hover:bg-white hover:text-black hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {isDelegating ? (
+                                            <>
+                                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                                PROCESSING...
+                                            </>
+                                        ) : (
+                                            "CONFIRM DELEGATION"
+                                        )}
                                     </Button>
                                 </DialogFooter>
                             </DialogContent>
