@@ -2,11 +2,11 @@
 
 ![JUDOL Banner](public/logo.png)
 
-> **DeSci Platform turning Academic Papers into Liquid IP Assets on Story Protocol.**
-> Built for the **Surreal World Assets Buildathon**.
+> **DeSci Platform turning Academic Papers into Liquid Assets on Arbitrum.**
+> Built for the **Arbitrum Open House NYC: Online Buildathon**.
 
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Story Protocol](https://img.shields.io/badge/Built%20on-Story%20Protocol-black)
+![Arbitrum Sepolia](https://img.shields.io/badge/Built%20on-Arbitrum%20Sepolia-blue)
 
 ## 🚀 Live Demo
 **🌐 Visit the App: [https://judol.netlify.app](https://judol.netlify.app)**
@@ -21,21 +21,21 @@ The academic publishing industry is broken:
 4.  **Slow Review:** Peer review takes months, often blocked by bias.
 
 ## 💡 The Solution
-**JUDOL** utilizes **Story Protocol** to create an on-chain reputation economy for researchers. We treat academic papers and datasets as **Programmable IP Assets**.
+**JUDOL** utilizes **Arbitrum Sepolia** with USDC payments to create an on-chain reputation economy for researchers. We treat academic papers and datasets as tokenized assets.
 
 ### Core Features:
-* **📄 Mint Research as IP:** Researchers upload PDFs to IPFS (via Pinata) and mint them as IP Assets on Story Protocol.
+* **📄 Mint Research as Assets:** Researchers upload PDFs to IPFS (via Pinata) and mint them as assets on Arbitrum with USDC.
 * **🤖 AI Agent Pre-Screening:** Submissions are analyzed by AI for plagiarism, structure, and novelty (SINTA Score prediction) before human review.
 * **⚖️ DAO Governance:** Verified experts (SINTA 1-2) vote to approve/reject papers.
-* **💰 Royalty & Licensing:**
-    * **Verified Papers:** Get a Commercial License (PIL). Authors earn royalties.
+* **💰 Payments & Monetization:**
+    * **Verified Papers:** Get published and receive USDC payments from readers/institutions.
     * **Data Pool:** Rejected papers become "Data Assets" for training AI models (monetizing failure).
 * **🎨 Neo-Brutalist UI:** A raw, honest, and bold design language emphasizing transparency.
 
 ### 🔄 Protocol Flow
 
 <div align="center">
-  <img width="800" alt="JUDOL Protocol Flow" src="https://github.com/user-attachments/assets/58537679-0790-469e-99a5-089892cc96c3" />
+  <img width="800" alt="JUDOL Protocol Flow" src="https://indigo-legislative-mackerel-269.mypinata.cloud/ipfs/bafkreihwbqaxgujeusvn2r7mhvheu3pxv4js27dpa4cczoogcr43wkpbsy" />
 </div>
 
 ---
@@ -44,7 +44,7 @@ The academic publishing industry is broken:
 
 | Category | Technology | Usage |
 | :--- | :--- | :--- |
-| **Blockchain** | **Story Protocol SDK** | IP Asset Registration, Licensing, Royalty Logic |
+| **Blockchain** | **Arbitrum Sepolia Testnet** | Asset Registration, USDC Payments |
 | **Framework** | **React + Vite** | Frontend Core |
 | **Language** | **TypeScript** | Type Safety |
 | **Styling** | **Tailwind CSS** | Neo-Brutalist Design System |
@@ -59,11 +59,11 @@ The academic publishing industry is broken:
 
 | **Home & Hero** | **Explore Graph** |
 |:---:|:---:|
-| <img src="https://github.com/user-attachments/assets/6f75d73e-9c29-4446-9306-b7e050457a97" alt="Home & Hero" /> | <img src="https://github.com/user-attachments/assets/03347d55-1f96-495c-89e6-d36d6b2359bb" alt="Explore Graph" /> |
+| <img src="https://indigo-legislative-mackerel-269.mypinata.cloud/ipfs/bafkreie2a7efgtc3edbaagxwtungxiyuv43qmtfkzcg2zetwlegbtkcxri" alt="Home & Hero" /> | <img src="https://indigo-legislative-mackerel-269.mypinata.cloud/ipfs/bafkreifiarcagrydzw6kmwvugoum5nqv4h5swf7m6wgmtvi5t35j6xq6mu" alt="Explore Graph" /> |
 
 | **Reviewer Hub** | **Minting Wizard** |
 |:---:|:---:|
-| <img src="https://github.com/user-attachments/assets/ea2d5287-a766-4f4b-9ebf-99f9f30bb50c" alt="Reviewer Hub" /> | <img src="https://github.com/user-attachments/assets/e7c3b181-01b3-4587-a62d-0e532e4818a5" alt="Minting Wizard" /> |
+| <img src="https://indigo-legislative-mackerel-269.mypinata.cloud/ipfs/bafkreibmhez7upcl5noz6jwd2raq6ecprofvxucfdff2ghv32bfkhmvwfm" alt="Reviewer Hub" /> | <img src="https://github.com/user-attachments/assets/e7c3b181-01b3-4587-a62d-0e532e4818a5" alt="Minting Wizard" /> |
 
 ---
 

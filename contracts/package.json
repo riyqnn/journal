@@ -10,6 +10,7 @@
     "compile": "hardhat compile",
     "deploy": "hardhat run scripts/deploy.ts --network arbitrumSepolia",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:new": "hardhat run scripts/deploy-all-new.ts --network arbitrumSepolia",
     "verify": "hardhat verify",
     "test": "hardhat test",
     "typechain": "hardhat typechain"
