@@ -64,15 +64,11 @@ export const useContract = () => {
     ipfsHash: string;
   }) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!CONTRACT_ADDRESS) {
-      toast.error("Contract address not configured!", {
-        description: "Please set VITE_RESEARCH_PAPER_NFT_ADDRESS in your .env file"
-      });
-      return { success: false };
+      return { success: false, error: "Contract address not configured. Please set VITE_RESEARCH_PAPER_NFT_ADDRESS in your .env file" };
     }
 
     setIsMinting(true);
@@ -85,15 +81,6 @@ export const useContract = () => {
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(CONTRACT_ADDRESS, RESEARCH_PAPER_NFT_ABI, signer);
 
-      // Log for debugging
-      console.log("Minting with params:", {
-        to: await signer.getAddress(),
-        ipfsHash: metadata.ipfsHash,
-        title: metadata.title,
-        author: metadata.author,
-        affiliation: metadata.affiliation
-      });
-
       // Call mintPaper function
       toast.loading("Please sign the transaction in your wallet...", { id: toastId });
 
@@ -105,7 +92,6 @@ export const useContract = () => {
         metadata.affiliation
       );
 
-      console.log("Transaction sent. Hash:", tx.hash);
       toast.loading("Confirming transaction...", { id: toastId });
 
       // Wait for transaction confirmation
@@ -280,6 +266,7 @@ export const useContract = () => {
         owner,
       };
     } catch (error) {
+      // Log error but return null (paper might not exist yet)
       console.error(`Error fetching paper ${tokenId}:`, error);
       return null;
     }
@@ -304,13 +291,11 @@ export const useContract = () => {
    */
   const updatePaperStatus = async (tokenId: string, newStatus: PaperStatus) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!CONTRACT_ADDRESS) {
-      toast.error("Contract address not configured!");
-      return { success: false };
+      return { success: false, error: "Contract address not configured" };
     }
 
     setIsUpdating(true);
@@ -360,7 +345,6 @@ export const useContract = () => {
   const watchPaperEvents = (callback: (event: { type: string; data: any }) => void) => {
     // Event listeners using eth_newFilter are not supported on Arbitrum Sepolia
     // This returns a no-op function to prevent errors and RPC spam
-    console.log("watchPaperEvents: Event listeners disabled (use manual refetch instead)");
     return () => {}; // No-op unsubscribe function
   };
 

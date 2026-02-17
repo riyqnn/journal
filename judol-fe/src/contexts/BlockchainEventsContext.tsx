@@ -14,7 +14,6 @@ const BlockchainEventsContext = createContext<BlockchainEventsContextType>({});
 export const BlockchainEventsProvider = ({ children }: { children: ReactNode }) => {
   // Event listeners are disabled to prevent RPC spam
   // Use manual refetch via React Query's refetch() method
-  console.log("BlockchainEventsProvider: Auto-refresh disabled (use manual refetch)");
 
   return (
     <BlockchainEventsContext.Provider value={{}}>

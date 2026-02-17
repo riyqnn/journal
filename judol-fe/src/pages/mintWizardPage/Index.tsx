@@ -92,7 +92,8 @@ export default function MintWizardPage() {
   // STEP 3: Handle Minting
   const handleMint = async (data: MetadataFormValues) => {
     if (!file) {
-      toast.error("Please upload a PDF file first!");
+      // Defer toast to after render
+      setTimeout(() => toast.error("Please upload a PDF file first!"), 0);
       return;
     }
 
@@ -162,7 +163,8 @@ export default function MintWizardPage() {
         queryClient.invalidateQueries({ queryKey: ['papers', 'all'] });
       }, 0);
     } else {
-        toast.error("Minting Failed. Check console.", { id: toastId });
+        // Show the error from the hook
+        toast.error(result?.error || "Minting Failed. Check console.", { id: toastId });
     }
   };
 

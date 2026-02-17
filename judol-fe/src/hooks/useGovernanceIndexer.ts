@@ -12,10 +12,8 @@ export const useMinQuorum = () => {
   return useQuery({
     queryKey: ['governance', 'minQuorum'],
     queryFn: async () => {
-      console.log("🔄 Fetching minimum quorum from contract...");
       const minQuorumBps = await getMinQuorum();
       const quorumPercent = (minQuorumBps / 100); // Convert basis points to percentage
-      console.log(` Min quorum: ${minQuorumBps} BPS (${quorumPercent.toFixed(2)}%)`);
       return { minQuorumBps, quorumPercent };
     },
     staleTime: 1000 * 60 * 30, // 30 minutes - rarely changes
@@ -36,20 +34,14 @@ export const useGovernanceProposals = (enableAutoRefresh = false) => {
   return useQuery({
     queryKey: ['governance', 'proposals'],
     queryFn: async () => {
-      console.log("🔄 useGovernanceIndexer: Fetching proposals from blockchain...");
-
       // Fetch ALL proposals using event-based approach
       const proposals = await getAllProposals();
-
-      console.log(`✅ useGovernanceIndexer: Fetched ${proposals.length} proposals from getAllProposals()`);
 
       // Validate and sort proposals
       // IMPORTANT: Check for existence (p != null) not truthiness, because id can be 0n (BigInt zero)
       const validatedProposals = proposals
         .filter(p => p != null) // Filter out null/undefined, but keep id: 0n
         .sort((a, b) => Number(b.id) - Number(a.id)); // Sort by ID descending (newest first)
-
-      console.log(`✅ useGovernanceIndexer: Returning ${validatedProposals.length} validated proposals`);
 
       return validatedProposals;
     },
@@ -72,15 +64,11 @@ export const useProposalDetails = (proposalId: number | string) => {
   return useQuery({
     queryKey: ['governance', 'proposal', String(proposalId)],
     queryFn: async () => {
-      console.log(`🔄 Fetching proposal #${proposalId} details...`);
-
       const proposal = await getProposal(Number(proposalId));
 
       if (!proposal) {
         throw new Error(`Proposal #${proposalId} not found`);
       }
-
-      console.log(`✅ Fetched proposal #${proposalId}:`, proposal);
 
       return proposal;
     },

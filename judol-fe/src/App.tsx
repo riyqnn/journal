@@ -89,7 +89,7 @@ const App = () => {
         staleTime: 60_000,
       });
     } catch (error) {
-      console.log("Prefetch failed, will load on demand");
+      // Silently fail prefetch, will load on demand
     }
   };
 

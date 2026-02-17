@@ -81,7 +81,8 @@ export default function GovernancePage() {
     // Handle submit proposal
     const handleSubmitProposal = useCallback(async () => {
         if (!newProp.title || !newProp.type) {
-            toast.error("Please fill in required fields");
+            // Defer toast to after render
+            setTimeout(() => toast.error("Please fill in required fields"), 0);
             return;
         }
 
@@ -103,13 +104,19 @@ export default function GovernancePage() {
                 queryClient.invalidateQueries({ queryKey: ['governance', 'stats'] });
                 refetchProposals();
             }, 0);
+        } else {
+            // Show error from hook if it failed
+            if (result.error) {
+                toast.error(result.error);
+            }
         }
     }, [newProp, createProposal, refetchProposals, queryClient]);
 
     // Handle vote
     const handleVote = useCallback(async (proposalId: number, support: boolean) => {
         if (!address) {
-            toast.error("Please connect your wallet first");
+            // Defer toast to after render
+            setTimeout(() => toast.error("Please connect your wallet first"), 0);
             return;
         }
 
@@ -123,18 +130,25 @@ export default function GovernancePage() {
                 refetchProposals();
                 refetchVotingPower();
             }, 0);
+        } else {
+            // Show error from hook if it failed
+            if (result.error) {
+                toast.error(result.error);
+            }
         }
     }, [address, vote, refetchProposals, refetchVotingPower, queryClient]);
 
     // Handle delegation
     const handleDelegate = useCallback(async () => {
         if (!address) {
-            toast.error("Please connect your wallet first");
+            // Defer toast to after render
+            setTimeout(() => toast.error("Please connect your wallet first"), 0);
             return;
         }
 
         if (!delegateAddress) {
-            toast.error("Please enter a delegate address");
+            // Defer toast to after render
+            setTimeout(() => toast.error("Please enter a delegate address"), 0);
             return;
         }
 
@@ -150,6 +164,11 @@ export default function GovernancePage() {
                 queryClient.invalidateQueries({ queryKey: ['governance', 'votingPower', address] });
                 refetchVotingPower();
             }, 0);
+        } else {
+            // Show error from hook if it failed
+            if (result.error) {
+                toast.error(result.error);
+            }
         }
         setIsDelegating(false);
     }, [address, delegateAddress, delegateVote, refetchVotingPower, queryClient]);

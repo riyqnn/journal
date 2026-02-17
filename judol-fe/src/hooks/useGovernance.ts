@@ -94,17 +94,12 @@ export const useGovernance = () => {
       const provider = getProvider();
       const contract = new ethers.Contract(GOVERNANCE_DAO_ADDRESS, GOVERNANCE_DAO_ABI, provider);
 
-      console.log("🔍 Fetching proposals using ProposalCreated events...");
-
       // Query ProposalCreated events to get actual proposal IDs
       // This is MUCH more efficient than scanning IDs 1-100
       const proposalCreatedFilter = contract.filters.ProposalCreated();
-      const events = await contract.queryFilter(proposalCreatedFilter, -100000); // Last ~100k blocks (~3 days on Arbitrum)
-
-      console.log(`✅ Found ${events.length} ProposalCreated events`);
+      const events = await contract.queryFilter(proposalCreatedFilter, -50000); // Last ~50k blocks (~1.5 days on Arbitrum)
 
       if (events.length === 0) {
-        console.log("⚠️ No ProposalCreated events found, returning empty array");
         return [];
       }
 
@@ -122,8 +117,6 @@ export const useGovernance = () => {
       // Remove duplicates and sort
       const uniqueIds = Array.from(new Set(proposalIds)).sort((a, b) => b - a); // Descending order
 
-      console.log(`📋 Fetching details for ${uniqueIds.length} unique proposals...`);
-
       // Fetch proposal details in batches of 10 to avoid RPC overload
       const batchSize = 10;
       const proposals: (Proposal | null)[] = [];
@@ -134,11 +127,14 @@ export const useGovernance = () => {
           batch.map(id => getProposal(id))
         );
         proposals.push(...batchResults);
-        console.log(`⏳ Batch ${Math.ceil((i + batchSize) / batchSize)} of ${Math.ceil(uniqueIds.length / batchSize)}`);
+
+        // Add 500ms delay between batches to avoid RPC rate limiting
+        if (i + batchSize < uniqueIds.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
 
       const validProposals = proposals.filter((p): p is Proposal => p !== null);
-      console.log(`✅ Successfully fetched ${validProposals.length} valid proposals`);
 
       return validProposals;
     } catch (error) {
@@ -176,7 +172,8 @@ export const useGovernance = () => {
         requiredVotes: proposal[11],
       };
     } catch (error) {
-      // Silently fail for non-existent proposals
+      // Log error but don't show to user (proposal might not exist)
+      console.error(`Error fetching proposal #${proposalId}:`, error);
       return null;
     }
   };
@@ -215,13 +212,11 @@ export const useGovernance = () => {
    */
   const vote = async (proposalId: number, support: boolean, voterAddress?: string) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!GOVERNANCE_DAO_ADDRESS) {
-      toast.error("Governance contract not configured!");
-      return { success: false };
+      return { success: false, error: "Governance contract not configured" };
     }
 
     // Check if user already voted
@@ -281,13 +276,11 @@ export const useGovernance = () => {
     votingPeriodSeconds: number = 7 * 24 * 60 * 60 // Default 7 days
   ) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!GOVERNANCE_DAO_ADDRESS) {
-      toast.error("Governance contract not configured!");
-      return { success: false };
+      return { success: false, error: "Governance contract not configured" };
     }
 
     setIsCreating(true);
@@ -351,8 +344,7 @@ export const useGovernance = () => {
    */
   const executeProposal = async (proposalId: number) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     const toastId = toast.loading("Executing proposal...");
@@ -386,18 +378,15 @@ export const useGovernance = () => {
    */
   const delegateVote = async (delegateAddress: string) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!GOVERNANCE_DAO_ADDRESS) {
-      toast.error("Governance contract not configured!");
-      return { success: false };
+      return { success: false, error: "Governance contract not configured" };
     }
 
     if (!delegateAddress || !delegateAddress.startsWith("0x") || delegateAddress.length !== 42) {
-      toast.error("Invalid delegate address!");
-      return { success: false, error: "Invalid address" };
+      return { success: false, error: "Invalid delegate address" };
     }
 
     const toastId = toast.loading("Setting up delegation...");
@@ -466,11 +455,9 @@ export const useGovernance = () => {
         const provider = getProvider();
         const contract = new ethers.Contract(GOVERNANCE_DAO_ADDRESS, GOVERNANCE_DAO_ABI, provider);
         const power = await contract.getVotingPower(address);
-        console.log("Voting power from governance contract:", power.toString());
         return power;
       } catch (e) {
         // Second try: Get directly from USDC contract
-        console.log("Governance contract getVotingPower failed, using USDC balance directly");
         const USDC_ADDRESS = import.meta.env.VITE_USDC_ADDRESS as `0x${string}`;
         if (!USDC_ADDRESS) return 0n;
 
@@ -480,7 +467,6 @@ export const useGovernance = () => {
         ];
         const usdcContract = new ethers.Contract(USDC_ADDRESS, usdcAbi, provider);
         const balance = await usdcContract.balanceOf(address);
-        console.log("USDC balance:", balance.toString());
         return balance;
       }
     } catch (error) {

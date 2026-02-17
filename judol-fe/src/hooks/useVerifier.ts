@@ -59,13 +59,11 @@ export const useVerifier = () => {
    */
   const registerVerifier = async () => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!VERIFIER_REGISTRY_ADDRESS) {
-      toast.error("Verifier Registry contract not configured!");
-      return { success: false };
+      return { success: false, error: "Verifier Registry contract not configured" };
     }
 
     setIsRegistering(true);
@@ -109,13 +107,11 @@ export const useVerifier = () => {
    */
   const verifyPaper = async (tokenId: string, approved: boolean, comment: string) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!VERIFIER_REGISTRY_ADDRESS) {
-      toast.error("Verifier Registry contract not configured!");
-      return { success: false };
+      return { success: false, error: "Verifier Registry contract not configured" };
     }
 
     setIsVerifying(true);
@@ -160,13 +156,11 @@ export const useVerifier = () => {
    */
   const claimReward = async (tokenId: string) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!VERIFIER_REGISTRY_ADDRESS) {
-      toast.error("Verifier Registry contract not configured!");
-      return { success: false };
+      return { success: false, error: "Verifier Registry contract not configured" };
     }
 
     setIsClaiming(true);

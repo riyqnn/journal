@@ -53,13 +53,11 @@ export const useUSDC = () => {
    */
   const transfer = async (to: string, amount: bigint) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!USDC_ADDRESS) {
-      toast.error("USDC contract not configured!");
-      return { success: false };
+      return { success: false, error: "USDC contract not configured" };
     }
 
     setIsTransferring(true);
@@ -104,13 +102,11 @@ export const useUSDC = () => {
    */
   const mint = async (to: string, amount: bigint) => {
     if (!walletClient) {
-      toast.error("Wallet not connected!");
-      return { success: false };
+      return { success: false, error: "Wallet not connected" };
     }
 
     if (!USDC_ADDRESS) {
-      toast.error("USDC contract not configured!");
-      return { success: false };
+      return { success: false, error: "USDC contract not configured" };
     }
 
     setIsMinting(true);

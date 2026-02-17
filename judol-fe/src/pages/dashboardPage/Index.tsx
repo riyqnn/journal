@@ -169,6 +169,11 @@ export default function DashboardPage() {
                     });
                 }
             }
+        } else {
+            // Show error from hook if registration failed
+            if (result.error) {
+                toast.error(result.error);
+            }
         }
     };
 

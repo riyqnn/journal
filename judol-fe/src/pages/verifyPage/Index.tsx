@@ -150,7 +150,8 @@ export default function VerifyPage() {
     // Handle verifier registration
     const handleRegisterVerifier = async () => {
         if (!address) {
-            toast.error("Please connect your wallet first");
+            // Defer toast to after render
+            setTimeout(() => toast.error("Please connect your wallet first"), 0);
             return;
         }
 
@@ -176,7 +177,6 @@ export default function VerifyPage() {
     const handleVote = async (tokenId: string, decision: 'APPROVE' | 'REJECT') => {
         // EARLY RETURN: Prevent duplicate calls
         if (verifyingTokenIds.has(tokenId) || isVerifying || processingRef.current[tokenId]) {
-            console.log("Already verifying this paper, ignoring duplicate click");
             return;
         }
 
@@ -186,7 +186,8 @@ export default function VerifyPage() {
 
         try {
             if (!address) {
-                toast.error("Please connect your wallet first");
+                // Defer toast to after render
+                setTimeout(() => toast.error("Please connect your wallet first"), 0);
                 // Remove from verifying set since we failed before blockchain operation
                 setVerifyingTokenIds(prev => {
                     const next = new Set(prev);
@@ -199,7 +200,8 @@ export default function VerifyPage() {
             // Check if registered as verifier
             const registered = await isVerifier(address);
             if (!registered) {
-                toast.error("You must register as a verifier first");
+                // Defer toast to after render
+                setTimeout(() => toast.error("You must register as a verifier first"), 0);
                 // Remove from verifying set since we failed before blockchain operation
                 setVerifyingTokenIds(prev => {
                     const next = new Set(prev);
