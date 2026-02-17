@@ -1,6 +1,6 @@
 # 📘 JUDOL: Journal of Underlying Decentralized Open Ledgers
 
-![JUDOL Banner](public/logo.png)
+![JUDOL Banner](judol-fe/public/logo.png)
 
 > **DeSci Platform turning Academic Papers into Liquid Assets on Arbitrum.**
 > Built for the **Arbitrum Open House NYC: Online Buildathon**.
